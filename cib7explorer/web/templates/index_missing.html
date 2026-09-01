@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}No profiles -- Process Explorer{% endblock %}
+{% block content %}
+<h1>No connection target known</h1>
+<div class="box-warn">
+  <p>There is no profile — neither from a profiles file nor from the environment. Either route
+     works:</p>
+
+  <p><strong>Profiles file</strong> (workstation, restored dump). Expected path:</p>
+  <p><code>{{ expected_path }}</code></p>
+  <p>Create one with — this writes an example profile and stores no credentials in clear text:</p>
+  <p><code>python -m cib7explorer init-profiles</code></p>
+
+  <p><strong>Environment</strong> (a container, one environment per deployment).
+     <code>CIB7_DB_HOST</code> is enough; everything else has a default:</p>
+  <pre>CIB7_DB_HOST=postgres
+CIB7_DB_NAME=camunda
+CIB7_DB_SCHEMA=public
+CIB7_DB_USER=explorer_ro
+CIB7_DB_PASSWORD=…
+CIB7_CLASSIFICATION=test     # unset means unknown, and then values stay hidden
+CIB7_PROFILE_NAME=my-environment</pre>
+
+  <p class="hint">The profiles file deliberately lives outside the repository and holds only
+     references to secrets, never a password itself. The environment profile likewise keeps only
+     the reference to <code>CIB7_DB_PASSWORD</code>, not the value.</p>
+</div>
+{% endblock %}

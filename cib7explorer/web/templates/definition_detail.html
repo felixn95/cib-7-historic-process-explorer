@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% block title %}{{ key }} — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+<p class="crumb"><a href="{{ base_path }}/profile/{{ profile.name }}/definitions">← all process definitions</a></p>
+<h1><code>{{ key }}</code></h1>
+{% if definition and definition.name and definition.name != key %}<p class="hint">{{ definition.name }}</p>{% endif %}
+
+{{ k.as_of(profile, has_data, built_at, age_ago, meta, job, cache_error) }}
+
+{% if not definition %}
+  <p class="warn">This definition is not part of the precomputed catalogue.</p>
+{% else %}
+{% set d = definition %}
+<section>
+  <h2>Key figures</h2>
+  <table class="kv">
+    <tr><th class="num">Instances</th><td>{{ d.instances | num }}
+      <span class="hint">of those {{ d.instances_as_root | num }} as a root instance, {{ d.instances_as_child | num }} as a subprocess call
+      {% if d.both_roles %} — this definition appears <strong>in both roles</strong>{% endif %}</span></td></tr>
+    <tr><th>Of those validation only</th><td>
+      {% if d.validation_flag_true is none %}<span class="hint">not determined</span>
+      {% else %}{{ d.validation_flag_true | fraction(d.instances) }}
+        <span class="hint">the <code>onlyValidation</code> input parameter is true at instance start — these are
+        dry runs, not real business events. Counter-check: {{ d.validation_flag_false | num }} with false{% if d.validation_flag_undecidable %},
+        {{ d.validation_flag_undecidable | num }} with an uninterpretable value{% endif %}{% if d.validation_flag_not_at_start %},
+        {{ d.validation_flag_not_at_start | num }} carry the marker only inside the process (the invocation mode cannot be determined from that){% endif %}.
+        What the process sets for itself is not counted: in some definitions the same variable is
+        written at an activity, where it means something else.</span>
+      {% endif %}</td></tr>
+    <tr><th>Period</th><td>{{ d.first_start | datetime(profile) }} to {{ d.last_start | datetime(profile) }}
+      <span class="hint">last end {{ d.last_end | datetime(profile) }}</span></td></tr>
+    <tr><th>Completed normally</th><td>{{ d.completed | fraction(d.instances) }}</td></tr>
+    <tr><th>Terminated</th><td>
+      from outside {{ d.externally_terminated | fraction(d.instances) }},
+      internally {{ d.internally_terminated | fraction(d.instances) }}</td></tr>
+    <tr><th>Running</th><td>{{ d.active | num }}{% if d.state_other %} <span class="hint">, {{ d.state_other | num }} with another or missing state</span>{% endif %}</td></tr>
+    <tr><th>Runtime</th><td>
+      p25 {{ d.duration.p25 | duration }} · <strong>median {{ d.duration.p50 | duration }}</strong> ·
+      p75 {{ d.duration.p75 | duration }} · p90 {{ d.duration.p90 | duration }} · p99 {{ d.duration.p99 | duration }} ·
+      max {{ d.duration.maximum | duration }}
+      <span class="hint">Basis: {{ d.duration.n | num }} instances with a measured duration{% if d.duration.n_unfinished %}, {{ d.duration.n_unfinished | num }} without one (running or terminated){% endif %}. No average.</span></td></tr>
+    <tr><th>Versions</th><td>{{ d.versions_used | num }} with instances
+      {% if d.deployed_versions %}<span class="hint">of {{ d.deployed_versions | num }} deployed, newest v{{ d.latest_deployed_version }}{% if d.suspended_versions %}, {{ d.suspended_versions }} suspended{% endif %}</span>{% endif %}</td></tr>
+    <tr><th>Business keys</th><td>{{ d.distinct_business_keys | num }} distinct
+      {% if d.instances_without_business_key %}<span class="hint">{{ d.instances_without_business_key | fraction(d.instances) }} instances without a key</span>{% endif %}</td></tr>
+    <tr><th>Incidents</th><td>
+      {% if d.open_incidents is none %}<span class="hint">not recorded</span>{% else %}{{ d.open_incidents | num }} open (running instances){% endif %}
+      <span class="hint">Incident history:
+        {% if d.historic_incidents is none %}not recorded — <code>act_hi_incident</code> is only written at history level FULL{% else %}{{ d.historic_incidents | num }}{% endif %}</span></td></tr>
+    <tr><th>User tasks</th><td>
+      {% if d.user_task_instances is none %}<span class="hint">not recorded</span>
+      {% else %}{{ d.user_task_instances | num }}{% if d.distinct_assignees %} <span class="hint">across {{ d.distinct_assignees }} distinct assignees</span>{% endif %}{% endif %}</td></tr>
+    <tr><th>Deployment</th><td>
+      {% if d.deployed %}still deployed{% else %}<strong>no longer deployed</strong> — appears only historically{% endif %}</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>End activities <span class="hint">({{ d.end_activities | length }} distinct)</span></h2>
+  <p class="hint">
+    Counted, not judged. The validationOnly marking comes from an editable pattern list in the
+    profile — naming in the models is inconsistent, and there is no technical field for it.
+  </p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th>End activity</th><th class="num">Instances</th><th class="num">Share</th><th>Classification</th></tr></thead>
+    <tbody>
+    {% for e in d.end_activities %}
+      <tr>
+        <td>{% if e.act_id %}<code>{{ e.act_id }}</code>{% else %}<span class="hint">no end event (running, terminated or deleted)</span>{% endif %}</td>
+        <td class="num">{{ e.instances | num }}</td>
+        <td class="num">{{ e.instances | fraction(d.instances) }}</td>
+        <td>
+          {% if e.validation_only %}<span class="tag tag-note">validationOnly</span>
+          {% elif e.validation_related %}<span class="tag">validation-related</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Variables of this definition <span class="hint">({{ variables | length }})</span></h2>
+  <p class="hint">Without values — these pages read no variable values, not even when the value mode is on.</p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr>
+      <th>Variable</th><th>Type(s)</th><th class="num">Present in</th><th class="num">With a value</th>
+      <th>First written</th><th>Scope</th><th>Size</th><th>First / last seen</th>
+    </tr></thead>
+    <tbody>
+    {% for v in variables %}
+      <tr>
+        <td><code>{{ v.name }}</code>
+          {% if v.type_switch %}<span class="tag tag-warn" title="more than one technical type — possible name collision">type switch</span>{% endif %}
+        </td>
+        <td>{{ v.types | join(", ") }}</td>
+        <td class="num">{{ v.instances_with | fraction(v.def_instances) }}</td>
+        <td class="num">
+          {% if v.null_typed %}{{ (v.occurrences - v.null_typed) | fraction(v.occurrences) }}
+            <div class="hint">{{ v.null_typed | num }}× type <code>null</code></div>
+          {% else %}all{% endif %}
+        </td>
+        <td>
+          {% if v.first_write_activities %}
+            {% for a in v.first_write_activities %}<div><code>{{ a.act_id }}</code>
+              <span class="hint">{{ a.act_type }} · {{ a.occurrences | num }}×</span></div>{% endfor %}
+            {% if v.first_write_at_instance_level %}<div class="hint">{{ v.first_write_at_instance_level | num }}× at instance start</div>{% endif %}
+          {% else %}<span class="hint">at instance start (input parameter)</span>{% endif %}
+          {% if v.from_call_activity %}<div><span class="tag tag-note">{{ v.from_call_activity | num }}× via a call activity</span></div>{% endif %}
+        </td>
+        <td class="hint">
+          instance {{ v.scope_process_instance | num }}
+          {%- if v.scope_below_process_instance %} · below {{ v.scope_below_process_instance | num }}{% endif %}
+          {%- if v.scope_task_local %} · task {{ v.scope_task_local | num }}{% endif %}
+          {%- if v.instances_multi_scope %}<div>{{ v.instances_multi_scope | num }} instances with several scopes</div>{% endif %}
+        </td>
+        <td class="hint">
+          {% if v.bytearray_size.n %}bytearray: median {{ v.bytearray_size.p50 | bytes_size }}, max {{ v.bytearray_size.maximum | bytes_size }}<br>{% endif %}
+          {% if v.inline_size.n %}inline: median {{ v.inline_size.p50 }} chars, max {{ v.inline_size.maximum }} chars{% endif %}
+          {% if v.serialization %}<div>{% for s in v.serialization %}{{ s.var_type }}{% if s.java_class %} <code>{{ s.java_class }}</code>{% endif %}
+            {% if s.resolvable_without_application is false %}<span class="tag tag-warn">not resolvable without the application</span>{% endif %}<br>{% endfor %}</div>{% endif %}
+        </td>
+        <td class="hint">{{ v.first_seen | datetime(profile, with_zone=False) }}<br>{{ v.last_seen | datetime(profile, with_zone=False) }}
+          {% if v.version_min is not none %}<div>v{{ v.version_min }}–v{{ v.version_max }}{% if v.in_latest_used_version is false %} <span class="tag">gone in the newest used version</span>{% endif %}</div>{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty-hint">No variables in the catalogue for this definition.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Versions</h2>
+  {% if versions_error %}<p class="warn">{{ versions_error }}</p>{% endif %}
+  <details>
+    <summary>Show {{ versions | length }} version(s) with instances</summary>
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr><th class="num">Version</th><th class="num">Instances</th><th>First</th><th>Last</th><th>Deployed</th><th>Version tag</th></tr></thead>
+      <tbody>
+      {% for v in versions %}
+        <tr>
+          <td class="num">v{{ v.version if v.version is not none else "?" }}</td>
+          <td class="num">{{ v.instances | num }}</td>
+          <td>{{ v.first_start | datetime(profile, with_zone=False) }}</td>
+          <td>{{ v.last_start | datetime(profile, with_zone=False) }}</td>
+          <td>{{ v.deployed_at | datetime(profile, with_zone=False) }}</td>
+          <td>{{ v.version_tag or "" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,28 @@
+{% if m %}
+<tr id="mark-{{ m.id }}">
+  <td>{{ m.kind.label }}</td>
+  <td>
+    {% set p = profiles.get(m.profile_name) %}
+    {% if m.kind.value == "business_key" and p %}<a href="{{ case_url(m.profile_name, m.reference) }}"><code>{{ m.reference }}</code></a>
+    {% elif m.kind.value == "instance" and p %}<a href="{{ instance_url(m.profile_name, m.reference) }}"><code>{{ m.reference }}</code></a>
+    {% elif m.kind.value == "definition" and p %}<a href="{{ base_path }}/profile/{{ m.profile_name }}/definitions/{{ m.reference }}"><code>{{ m.reference }}</code></a>
+    {% else %}<code>{{ m.reference }}</code>{% endif %}
+  </td>
+  <td class="hint">{{ m.context }}</td>
+  <td>
+    <form hx-post="{{ base_path }}/marks/{{ m.id }}/note" hx-target="#mark-{{ m.id }}" hx-swap="outerHTML"
+          method="post" action="{{ base_path }}/marks/{{ m.id }}/note" class="note-form">
+      <input type="text" name="note" value="{{ m.note }}" size="40" placeholder="Note …">
+      <button type="submit" class="small">save</button>
+    </form>
+  </td>
+  <td class="hint">{{ m.profile_name }}</td>
+  <td class="hint">{{ m.created_at }}</td>
+  <td>
+    <form hx-post="{{ base_path }}/marks/{{ m.id }}/delete" hx-target="#mark-{{ m.id }}" hx-swap="outerHTML"
+          method="post" action="{{ base_path }}/marks/{{ m.id }}/delete">
+      <button type="submit" class="small">delete</button>
+    </form>
+  </td>
+</tr>
+{% endif %}

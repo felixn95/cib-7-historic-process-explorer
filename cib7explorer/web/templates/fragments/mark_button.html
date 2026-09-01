@@ -1,0 +1,17 @@
+<span class="mark" id="mark-button">
+  {% if error %}<span class="hint warn">{{ error }}</span>{% endif %}
+  {% if marks %}
+    <span class="tag tag-own" title="{{ marks | length }} entry/entries in the mark list">marked ({{ marks | length }})</span>
+    {% for m in marks %}{% if m.note %}<span class="hint">“{{ m.note }}”</span>{% endif %}{% endfor %}
+    <a class="hint" href="{{ base_path }}/marks">open the mark list</a>
+  {% endif %}
+  <form hx-post="{{ base_path }}/marks/new" hx-target="#mark-button" hx-swap="outerHTML"
+        method="post" action="{{ base_path }}/marks/new" class="mark-form">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="reference" value="{{ reference }}">
+    <input type="hidden" name="profile" value="{{ profile }}">
+    <input type="hidden" name="context" value="{{ context }}">
+    <input type="text" name="note" placeholder="note (optional)" size="30">
+    <button type="submit" class="small">mark</button>
+  </form>
+</span>

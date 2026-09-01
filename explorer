@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+# Development helper for the process explorer.
+#
+# One command with subcommands, so there is nothing to memorise:
+#   ./explorer start     bring up the database and the interface, print the URL
+#   ./explorer update    after code changes: dependencies, tests, restart
+#   ./explorer restart   restart the interface only (reloads the code)
+#   ./explorer stop      stop the interface (the database keeps running)
+#   ./explorer status    what is running, which data, how old
+#   ./explorer test      unit tests; with --all also the ones against a database
+#   ./explorer logs      follow the interface log
+#   ./explorer psql      open psql on the restored database
+#   ./explorer restore   (re)load the dump
+#   ./explorer network   attach the restored database to a Docker network
+#
+#
+# Environment: CIB7_PROFILE (default: demo-dump), CIB7_PORT (default: 8123).
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$HERE"
+
+PORT="${CIB7_PORT:-8123}"
+PROFILE="${CIB7_PROFILE:-demo-dump}"
+PYTHON="$HERE/.venv/bin/python"
+LOG="$HERE/.explorer.log"
+PIDFILE="$HERE/.explorer.pid"
+
+red()   { printf '\033[31m%s\033[0m\n' "$*"; }
+green() { printf '\033[32m%s\033[0m\n' "$*"; }
+grey()  { printf '\033[2m%s\033[0m\n' "$*"; }
+
+check_venv() {
+  if [[ ! -x "$PYTHON" ]]; then
+    red "No virtual environment found in .venv."
+    echo "  Create one with:  uv venv --python 3.13 .venv && uv pip install -e '.[dev]'"
+    exit 1
+  fi
+}
+
+# The running server is detected by its port, not only by the PID file -- otherwise a uvicorn
+# started by hand counts as "not running" and start would shoot it down.
+ui_pid() {
+  if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    cat "$PIDFILE"; return 0
+  fi
+  local pid
+  pid="$(pgrep -f "uvicorn cib7explorer.web.app.*--port $PORT" | head -1)"
+  [[ -n "$pid" ]] && { echo "$pid"; return 0; }
+  return 1
+}
+
+ui_running() { ui_pid >/dev/null; }
+
+_container_of_profile() {
+  "$PYTHON" - <<'PY' 2>/dev/null
+from cib7explorer import config
+from cib7explorer.contracts import ProfileKind
+import os
+try:
+    p = config.get_profile(os.environ.get("CIB7_PROFILE", "demo-dump"))
+except Exception:
+    raise SystemExit(0)
+print(p.container_name if p.kind is ProfileKind.LOCAL_RESTORE else "")
+PY
+}
+
+database_up() {
+  # Only needed for profiles that use a restored dump.
+  local container
+  container="$(_container_of_profile)"
+  [[ -z "$container" ]] && return 0
+
+  if ! docker info >/dev/null 2>&1; then
+    red "Docker is not running — the restored database is therefore unreachable."
+    echo "  Start Docker and call './explorer start' again."
+    return 1
+  fi
+  if [[ -z "$(docker ps -q -f "name=^${container}$")" ]]; then
+    if [[ -n "$(docker ps -aq -f "name=^${container}$")" ]]; then
+      grey "Container $container was stopped, starting it …"
+      docker start "$container" >/dev/null
+    else
+      red "Container $container does not exist — restore the dump first:"
+      echo "  ./explorer restore"
+      return 1
+    fi
+  fi
+  for _ in $(seq 1 30); do
+    docker exec "$container" pg_isready -U postgres >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  red "PostgreSQL in $container did not become ready."
+  return 1
+}
+
+ui_start() {
+  if ui_running; then
+    grey "The interface is already running (PID $(ui_pid))."
+    return 0
+  fi
+  # An occupied port is almost always a forgotten run without a PID file.
+  if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    grey "Port $PORT is in use — stopping the existing process …"
+    pkill -f "uvicorn cib7explorer.web.app" 2>/dev/null
+    sleep 2
+  fi
+  nohup "$PYTHON" -m uvicorn cib7explorer.web.app:app \
+      --host 127.0.0.1 --port "$PORT" >"$LOG" 2>&1 &
+  echo $! >"$PIDFILE"
+  for _ in $(seq 1 20); do
+    sleep 1
+    if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/health" 2>/dev/null; then
+      green "The interface is running:  http://127.0.0.1:$PORT"
+      grey  "Log: ./explorer logs   ·  Stop: ./explorer stop"
+      return 0
+    fi
+  done
+  red "The interface is not answering. Last lines from $LOG:"
+  tail -15 "$LOG"
+  return 1
+}
+
+ui_stop() {
+  local pid
+  pid="$(ui_pid || true)"
+  if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+    sleep 1
+  fi
+  pkill -f "uvicorn cib7explorer.web.app" 2>/dev/null
+  rm -f "$PIDFILE"
+  green "The interface has been stopped."
+}
+
+command="${1:-start}"
+shift || true
+
+case "$command" in
+  start)
+    check_venv
+    database_up || exit 1
+    ui_start
+    ;;
+
+  stop)
+    ui_stop
+    ;;
+
+  restart)
+    check_venv
+    ui_stop
+    ui_start
+    ;;
+
+  update)
+    # The route after a code change: sync dependencies, run the unit tests, restart.
+    check_venv
+    echo "1/3  syncing dependencies"
+    if command -v uv >/dev/null 2>&1; then
+      uv pip install -q -e ".[dev]" || { red "Installation failed."; exit 1; }
+    else
+      "$PYTHON" -m pip install -q -e ".[dev]" || { red "Installation failed."; exit 1; }
+    fi
+    echo "2/3  unit tests"
+    if ! "$PYTHON" -m pytest -q tests/; then
+      red "Tests are red — the interface will NOT be restarted."
+      exit 1
+    fi
+    echo "3/3  restarting the interface"
+    ui_stop >/dev/null
+    database_up || exit 1
+    ui_start
+    ;;
+
+  status)
+    check_venv
+    if ui_running; then green "Interface: running (PID $(ui_pid)) → http://127.0.0.1:$PORT"
+    else grey "Interface: not running"; fi
+    if docker info >/dev/null 2>&1; then
+      docker ps -a --filter "name=cib7" --format '  container {{.Names}}: {{.Status}}'
+    else grey "  Docker is not running"; fi
+    "$PYTHON" - <<'PY'
+import os
+from cib7explorer import config
+try:
+    profile = config.get_profile(os.environ.get("CIB7_PROFILE", "demo-dump"))
+except Exception as exc:
+    print(f"  profile not readable: {exc}")
+    raise SystemExit(0)
+print(f"  profile {profile.name}: {profile.classification.value}, "
+      f"{profile.host}:{profile.port}/{profile.database}, values "
+      f"{'on' if profile.values_mode_effective else 'off'}")
+try:
+    from cib7explorer.db import connection, detect
+    with connection.connect(profile) as db:
+        d = detect.detect(db, profile)
+    missing = [f.feature.value for f in d.features if not f.available]
+    print(f"  database reachable: engine schema {d.engine_schema_version}, "
+          f"history level {d.history_level.label if d.history_level else '?'}, "
+          f"{len(missing)} capabilities not recorded")
+    w = d.history_window
+    if w and w.first_start:
+        print(f"  history {w.first_start:%Y-%m-%d} to {w.last_end:%Y-%m-%d}"
+              if w.last_end else f"  history from {w.first_start:%Y-%m-%d}")
+except Exception as exc:
+    print(f"  database unreachable: {type(exc).__name__}")
+try:
+    from cib7explorer.notes import default_notes
+    print(f"  marks: {default_notes().count()} entries")
+except Exception:
+    pass
+PY
+    ;;
+
+  test)
+    check_venv
+    if [[ "${1:-}" == "--all" ]]; then
+      echo "Unit tests:"; "$PYTHON" -m pytest -q tests/ || exit 1
+      echo "Tests against the database (takes a couple of minutes):"
+      database_up || exit 1
+      "$PYTHON" -m pytest -q -m integration tests/
+    else
+      "$PYTHON" -m pytest -q tests/ "$@"
+    fi
+    ;;
+
+  logs)
+    [[ -f "$LOG" ]] || { grey "No log yet — the interface has not run."; exit 0; }
+    tail -f "$LOG"
+    ;;
+
+  psql)
+    docker exec -it "$(docker ps -q -f name=cib7 | head -1)" psql -U postgres -d camunda "$@"
+    ;;
+
+  restore)
+    check_venv
+    "$PYTHON" -m cib7explorer restore "$PROFILE" "$@"
+    ;;
+
+  network)
+    # Attach the restored database to an existing Docker network, so that an explorer running
+    # as a service in that network reaches it under a fixed name.
+    #
+    # Why it stays in its own container: a dump is often produced by a different PostgreSQL
+    # major version than the database service of the surrounding stack, so it cannot simply be
+    # loaded there. After a `restore --force` (new container) this command is needed again.
+    check_venv
+    NETWORK="${CIB7_NETWORK:?set CIB7_NETWORK to the Docker network to join}"
+    ALIAS="${CIB7_ALIAS:-cib7-history}"
+    container="$(_container_of_profile)"
+    if [[ -z "$container" ]]; then
+      red "Profile $PROFILE does not manage a container of its own (kind is not local_restore)."
+      echo "  './explorer network' applies to a restored database only."
+      exit 1
+    fi
+    docker info >/dev/null 2>&1 || { red "Docker is not running."; exit 1; }
+    if [[ -z "$(docker ps -q -f "name=^${container}$")" ]]; then
+      red "Container $container is not running — run './explorer start' or './explorer restore' first."
+      exit 1
+    fi
+    if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
+      red "The network $NETWORK does not exist."
+      echo "  Start the stack that owns it first, or pick another: CIB7_NETWORK=... ./explorer network"
+      exit 1
+    fi
+    if docker network inspect "$NETWORK" --format '{{range .Containers}}{{.Name}} {{end}}' \
+         | tr ' ' '\n' | grep -qx "$container"; then
+      grey "$container is already attached to $NETWORK."
+    elif docker network connect --alias "$ALIAS" "$NETWORK" "$container"; then
+      green "$container is now attached to $NETWORK as '$ALIAS'."
+    else
+      red "Connecting to the network $NETWORK failed."
+      exit 1
+    fi
+    grey "Reachable inside the network as:  $ALIAS:5432"
+    ;;
+
+  *)
+    # Only the comment header up to the first empty comment line is the usage text.
+    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

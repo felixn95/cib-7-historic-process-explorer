@@ -1,0 +1,45 @@
+<div id="correlation">
+{% if locked %}
+  <p class="hint">{{ locked }}</p>
+{% elif error %}
+  <div class="box-error">{{ error }}</div>
+{% elif not profile.correlation_variables %}
+  <p class="empty-hint">
+    No correlation variables are configured for this profile, so this track has nothing to look
+    for. Which variable identifies a business object is a modelling decision of this installation
+    — the <a href="{{ base_path }}/profile/{{ profile.name }}/variables">variable catalogue</a>
+    shows which names exist. Put them into <code>correlation_variables</code> in the profile, or
+    into <code>CIB7_CORRELATION_VARIABLES</code>.
+  </p>
+{% elif not correlations %}
+  <p class="empty-hint">
+    No instance outside this case carries one of the configured object-id values.
+    Checked: {{ profile.correlation_variables | join(", ") }}.
+  </p>
+{% else %}
+  <p class="hint">
+    Instances carrying the same value of an object-id variable while <strong>not</strong> belonging
+    to this case through its business key or parent chain. Plain counting — whether two
+    identically named variables mean the same thing is not something the data says. These
+    instances are <strong>not</strong> added to the case.
+  </p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th>Variable</th><th>Value</th><th class="num">In this case</th>
+      <th class="num">Total</th><th class="num">Outside</th><th>Definitions outside</th></tr></thead>
+    <tbody>
+    {% for c in correlations %}
+      <tr>
+        <td><code>{{ c.variable }}</code></td>
+        <td><code>{{ c.value_shown }}</code></td>
+        <td class="num">{{ c.instances_in_case | num }}</td>
+        <td class="num">{{ c.instances_total | num }}</td>
+        <td class="num"><strong>{{ c.instances_outside | num }}</strong>{% if c.truncated %} <span class="tag tag-warn">limit reached</span>{% endif %}</td>
+        <td class="hint">{{ c.outside_def_keys | join(", ") }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endif %}
+</div>

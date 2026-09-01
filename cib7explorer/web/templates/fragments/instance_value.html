@@ -1,0 +1,13 @@
+{# Used in two places: as an HTMX fragment and -- when JavaScript is off -- as a page of its
+   own. That is why it carries a heading and a way back. #}
+{% if page %}<p class="crumb"><a href="{{ back }}">← back to the instance</a></p>
+<h1>Variable <code>{{ variable }}</code></h1>{% endif %}
+{% if error %}
+  <span class="hint warn">{{ error }}</span>
+{% elif value is none %}
+  <span class="hint">No readable value (possibly a Java object stream — not resolvable without
+    the application's own classes).{% if hint %} {{ hint }}{% endif %}</span>
+{% else %}
+  {% if size %}<p class="hint">{{ size | bytes_size }} in the database{% if hint %} · {{ hint }}{% endif %}</p>{% endif %}
+  <pre class="value-block" tabindex="0">{{ value }}</pre>
+{% endif %}

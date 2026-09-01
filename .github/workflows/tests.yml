@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    # The unit suite needs no database and no Docker: an autouse fixture points every profile
+    # path at a temporary directory, so a run never reads the developer's own configuration.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Create the environment
+        # uv sync installs exactly what uv.lock pins, so a green run here means the same
+        # versions a developer has locally -- not whatever resolved on the day.
+        run: uv sync --all-extras --python ${{ matrix.python }}
+
+      - name: Unit tests
+        # The integration tests are deselected by the addopts in pyproject.toml; they need a
+        # reachable engine database and are meant to be run against one deliberately.
+        run: uv run pytest -q
+
+  build:
+    # A package that cannot be built is broken even when the tests are green.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  image:
+    # Build only -- publishing an image is a deliberate act and does not belong in a test run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t cib7explorer:ci .
+      - name: The image answers on /health
+        run: |
+          docker run -d --name probe -p 8123:8123 \
+            -e CIB7_DB_HOST=127.0.0.1 -e CIB7_DB_NAME=none \
+            -e CIB7_DB_USER=none -e CIB7_DB_PASSWORD=none \
+            cib7explorer:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8123/health >/dev/null 2>&1; then
+              echo "healthy after ${i}s"; docker rm -f probe; exit 0
+            fi
+            sleep 1
+          done
+          echo "no answer on /health"; docker logs probe; docker rm -f probe; exit 1

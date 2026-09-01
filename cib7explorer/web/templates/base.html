@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" {% if prod_warning %}data-theme="light"{% endif %}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Process Explorer{% endblock %}</title>
+  <link rel="stylesheet" href="{{ base_path }}/static/style.css?v={{ static_version('style.css') }}">
+  <script src="{{ base_path }}/static/htmx.min.js"></script>
+  <script src="{{ base_path }}/static/value.js?v={{ static_version('value.js') }}" defer></script>
+</head>
+<body>
+<svg class="icon-store" aria-hidden="true" focusable="false">
+  <symbol id="icon-copy" viewBox="0 0 16 16">
+    <rect x="5.5" y="2.5" width="8" height="10" rx="1.5"/>
+    <path d="M10.5 2.5V1.5H2.5v10h1.5"/>
+  </symbol>
+</svg>
+{% if prod_warning %}
+<div class="prod-stripe">⚠ PRODUCTION SYSTEM -- {{ prod_warning }}</div>
+{% endif %}
+<header class="topbar">
+  <a class="brand" href="{{ base_path }}/"><span class="title">Process Explorer</span></a>
+  {% block header %}{% endblock %}
+  {# Who is signed in belongs where the work happens, just like the classification.
+     `request.session` may only be touched when a login is configured: without the session
+     middleware the access raises. #}
+  {% if auth_enabled %}{% set user = request.session.get("user") %}
+  {% if user %}
+  <span class="topbar-right hint">{{ user.name }}
+    <a class="topbar-item" href="{{ base_path }}/logout">sign out</a></span>
+  {% endif %}{% endif %}
+</header>
+<main>
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

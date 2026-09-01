@@ -1,0 +1,14 @@
+# The build context is shipped to the Docker daemon -- without this file a multi-gigabyte dump
+# would travel along on every build. So: exclude everything first, then pull back in the little
+# that the image needs (see COPY in the Dockerfile).
+*
+
+!pyproject.toml
+!README.md
+!cib7explorer/
+
+# Inside cib7explorer/, take nothing built and no secrets.
+**/__pycache__/
+**/*.pyc
+**/profiles.yaml
+**/*.pw

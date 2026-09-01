@@ -1,0 +1,71 @@
+{# Header bar and catalogue-age bar for the definition pages. Macros, so that the three pages do
+   not carry the same markup three times over. #}
+
+{% macro topbar(profile) -%}
+<span class="badge badge-{{ profile.classification.value }}">{{ profile.name }} · {{ profile.classification.value }}</span>
+<span class="topbar-item">read-only</span>
+<span class="topbar-item">Time: displayed in {{ profile.display_timezone }} — database values in {{ profile.source_timezone }}</span>
+<span class="topbar-item">These pages show <strong>no values</strong></span>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}">Detection</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/definitions">Processes</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/variables">Variables</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/case">Cases</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/landscape">Landscape</a>
+<a class="topbar-item" href="{{ base_path }}/marks">Marks</a>
+{%- endmacro %}
+
+{# Age of the precomputation. It has to be visible on every one of these pages: a number
+   without its date is a number nobody can act on. #}
+{% macro as_of(profile, has_data, built_at, age_ago, meta, job, cache_error) -%}
+<div class="catalog-age">
+  {% if cache_error %}
+    <p class="warn">Cache unavailable: {{ cache_error }}</p>
+  {% endif %}
+  {% if has_data %}
+    <p>
+      <strong>Catalogue built {{ built_at | datetime(profile) }}</strong>
+      <span class="hint">({{ age_ago }})</span>
+      {% if meta and meta.duration_ms %}<span class="hint">· the build took {{ meta.duration_ms | duration }}</span>{% endif %}
+      {% if meta and meta.rows %}<span class="hint">· {{ meta.rows | num }} variable rows</span>{% endif %}
+    </p>
+    {% if meta and meta.notes %}
+      <details class="notes">
+        <summary>{{ meta.notes | length }} caveat(s) that matter when reading these numbers</summary>
+        <ul>{% for n in meta.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+      </details>
+    {% endif %}
+  {% endif %}
+  <div id="catalog-status"
+       {% if job %}hx-get="{{ base_path }}/profile/{{ profile.name }}/catalog/status" hx-trigger="load delay:2s" hx-swap="outerHTML"{% endif %}>
+    {% if job %}
+      <p>Build running … {{ job.message }}</p>
+    {% elif not has_data %}
+      <p class="empty-hint">
+        No catalogue has been precomputed for this profile yet. The analysis runs across the large
+        history tables, so it is computed once and then kept —
+        <strong>expect roughly one to three minutes</strong>, depending on the size of the history.
+      </p>
+    {% endif %}
+    <form method="post" action="{{ base_path }}/profile/{{ profile.name }}/catalog/rebuild"
+          hx-post="{{ base_path }}/profile/{{ profile.name }}/catalog/rebuild" hx-target="#catalog-status" hx-swap="outerHTML">
+      <button type="submit">{{ "Rebuild catalogue" if has_data else "Build catalogue" }}</button>
+      <span class="hint">
+        {% if has_data %}Reads the process definitions and all {{ (meta.rows if meta else 0) | num }}
+        variable rows from the database again and replaces the precomputation. Needed when new
+        processes have run since the timestamp above. Takes about one to three minutes and runs in
+        the background — the page stays usable and the old numbers remain visible until it finishes.
+        {% else %}Reads process definitions and variables from the database once in full and stores
+        the result locally. Runs in the background; the page stays usable.{% endif %}
+      </span>
+    </form>
+  </div>
+</div>
+{%- endmacro %}
+
+{# Sortable column header: server-side, one link carrying sort/dir -- no JavaScript. #}
+{% macro th(label, key, sort, dir, base, extra="", cls="") -%}
+{%- set nextdir = "asc" if (sort == key and dir == "desc") else "desc" -%}
+<th class="{{ cls }}{{ ' sorted' if sort == key else '' }}">
+  <a href="{{ base }}?sort={{ key }}&dir={{ nextdir }}{{ extra }}">{{ label }}{% if sort == key %} {{ "▾" if dir == "desc" else "▴" }}{% endif %}</a>
+</th>
+{%- endmacro %}

@@ -1,0 +1,75 @@
+{# Fragment for /profile/{name}/restore/status. It keeps polling itself every 2 s while the
+   state is not terminal: the outer shell carries hx-get/hx-trigger only while something is
+   still happening. Once the state is terminal (READY/FAILED), or there is no state at all,
+   those attributes are absent from the replacement HTML and htmx schedules nothing further --
+   the classic self-cancelling htmx poll via hx-swap.
+
+   ABSENT is deliberately not polled: the expensive reality check in status() would re-hash the
+   dump file over and over (see _restore_current_status in app.py), and without a started
+   restore there is nothing that could change every two seconds anyway. #}
+{% set _active_phases = ["checking", "creating_container", "restoring", "post_processing"] %}
+{% set labels = {
+  "absent": "no restore started",
+  "checking": "checking",
+  "creating_container": "creating the container",
+  "restoring": "restoring",
+  "post_processing": "post-processing (ANALYZE, read-only role, normal operation)",
+  "ready": "done, database ready",
+  "failed": "failed",
+} %}
+<div id="restore-status"
+     {% if state and state.phase.value in _active_phases %}hx-get="{{ base_path }}/profile/{{ profile.name }}/restore/status" hx-trigger="load delay:2s" hx-swap="outerHTML"{% endif %}>
+
+  {% if error %}
+  <div class="box-warn">{{ error }}</div>
+  <button hx-post="{{ base_path }}/profile/{{ profile.name }}/restore" hx-target="#restore-status" hx-swap="outerHTML">
+    Start restore
+  </button>
+
+  {% elif not state %}
+  <p class="muted">no restore state could be determined.</p>
+
+  {% else %}
+  <p>
+    Phase: <strong>{{ labels.get(state.phase.value, state.phase.value) }}</strong>
+    {% if state.percent is not none %}({{ state.percent }} %){% endif %}
+    {% if state.current_item %} -- currently: <code>{{ state.current_item }}</code>{% endif %}
+  </p>
+
+  {% if state.toc_items_total %}
+  <div style="background:var(--border); border-radius:3px; height:8px; width:100%; max-width:400px; overflow:hidden;">
+    <div style="background:var(--bar-fill); height:8px; width:{{ state.percent or 0 }}%;"></div>
+  </div>
+  <p class="hint">{{ state.toc_items_done | num }} of {{ state.toc_items_total | num }} objects, {{ state.tables_done | length }} tables finished.</p>
+  {% endif %}
+
+  {% if state.adopted_existing %}
+  <p class="hint">An existing container was adopted; no new restore was needed.</p>
+  {% endif %}
+  {% if state.source_server_version %}
+  <p class="hint">The source was produced with PostgreSQL {{ state.source_server_version }}.</p>
+  {% endif %}
+
+  {% if state.phase.value == "failed" and state.error %}
+  <div class="box-error">{{ state.error }}</div>
+  {% endif %}
+
+  {% if state.log_tail %}
+  <details>
+    <summary class="hint">last log lines</summary>
+    <pre style="white-space:pre-wrap; font-size:0.85em;">{% for line in state.log_tail[-20:] %}{{ line }}
+{% endfor %}</pre>
+  </details>
+  {% endif %}
+
+  {% if state.phase.value in ("absent", "failed") %}
+  <button hx-post="{{ base_path }}/profile/{{ profile.name }}/restore" hx-target="#restore-status" hx-swap="outerHTML">
+    {{ "Start restore" if state.phase.value == "absent" else "Try again" }}
+  </button>
+  {% elif state.phase.value == "ready" %}
+  <button hx-post="{{ base_path }}/profile/{{ profile.name }}/restore?force=true" hx-target="#restore-status" hx-swap="outerHTML">
+    Restore again (overwrite)
+  </button>
+  {% endif %}
+  {% endif %}
+</div>

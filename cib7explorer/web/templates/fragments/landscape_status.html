@@ -1,0 +1,19 @@
+<div id="landscape-job" {% if job and not job.is_terminal %}hx-get="{{ base_path }}/profile/{{ profile.name }}/landscape/status" hx-trigger="load delay:2s" hx-swap="outerHTML"{% endif %}>
+  {% if not job %}<p class="empty-hint">No build known.</p>
+  {% elif job.phase == "running" %}
+    <p><strong>Computing the landscape …</strong>
+      {% if job.percent is not none %}<span class="pct">{{ job.percent }} %</span>{% endif %}
+      <span class="hint">{{ job.message }}</span></p>
+    <div class="bar"><div class="bar-fill" style="width: {{ job.percent or 0 }}%"></div></div>
+  {% elif job.phase == "done" %}
+    <p class="ok"><strong>Finished</strong> — {{ job.result_summary }}
+      <span class="hint">in {{ job.duration_ms | duration }}</span></p>
+    <p><a href="{{ base_path }}/profile/{{ profile.name }}/landscape">Reload the page</a></p>
+  {% elif job.phase == "failed" %}
+    <p class="warn"><strong>Build failed:</strong> {{ job.error }}</p>
+  {% endif %}
+  <form hx-post="{{ base_path }}/profile/{{ profile.name }}/landscape/rebuild" hx-target="#landscape-job" hx-swap="outerHTML"
+        method="post" action="{{ base_path }}/profile/{{ profile.name }}/landscape/rebuild">
+    <button type="submit">Recompute</button>
+  </form>
+</div>

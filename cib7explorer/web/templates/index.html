@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Process Explorer{% endblock %}
+{% block header %}
+<a class="topbar-item" href="{{ base_path }}/marks">Marks{% if mark_count %} ({{ mark_count }}){% endif %}</a>
+<span class="topbar-item">Docker: {{ "available" if docker_ok else docker_msg }}</span>
+{% endblock %}
+
+{% block content %}
+<h1>Process Explorer</h1>
+<p class="lead">
+  A tool for reading and understanding the process history of a CIB seven or Camunda 7 engine.
+  It <strong>only ever reads</strong> — browse the definitions, follow one business object from
+  beginning to end, zoom into a single process instance.
+</p>
+
+{% if not rows %}
+<p class="box-warn">The profiles file <code>{{ profiles_file }}</code> exists but contains no
+  profiles. Create one with <code>python -m cib7explorer init-profiles</code>.</p>
+{% endif %}
+
+<h2>Databases</h2>
+<p class="hint">
+  A profile is one way into <em>one</em> engine database. Its classification decides whether
+  variable values may be shown at all: <span class="badge badge-test">test</span> shows values,
+  <span class="badge badge-unknown">unknown</span> and
+  <span class="badge badge-prod">prod</span> only with an explicit allowlist.
+</p>
+
+{% for profile in rows %}
+<div class="card-panel">
+  <div class="card-header">
+    <span class="card-name">{{ profile.name }}</span>
+    <span class="badge badge-{{ profile.classification.value }}">{{ profile.classification.value }}</span>
+    <span class="hint">
+      {% if profile.kind.value == "local_restore" %}restored dump{% elif profile.kind.value == "direct" %}direct connection{% else %}SSH tunnel{% endif %}
+      · <code>{{ profile.host }}:{{ profile.port }}/{{ profile.database }}</code> as <code>{{ profile.user }}</code>
+      · values {{ "on" if profile.values_mode_effective else "off" }}
+      · displayed in {{ profile.display_timezone }}
+    </span>
+  </div>
+
+  {% if profile.kind.value == "local_restore" %}
+  <div class="card-state" id="restore-brief-{{ profile.name }}"
+       hx-get="{{ base_path }}/profile/{{ profile.name }}/restore/status" hx-trigger="load" hx-swap="innerHTML">
+    <span class="hint">checking the state of the restored database …</span>
+  </div>
+  {% endif %}
+
+  <p class="card-explain">
+    <a class="btn btn-primary" href="{{ base_path }}/profile/{{ profile.name }}">Connect and inspect →</a>
+    <span class="hint">
+      Opens a read-only connection and shows first of all <strong>what is being read</strong>:
+      engine and schema version, configured history level, the period the history covers, table
+      sizes — and explicitly which data this database does <em>not</em> contain. Nothing is
+      written and nothing is changed; if a dump has not been restored yet, that can be started
+      from there.
+    </span>
+  </p>
+
+  <p class="card-links">
+    Straight into a view:
+    <a href="{{ base_path }}/profile/{{ profile.name }}/definitions">Processes</a>
+    <a href="{{ base_path }}/profile/{{ profile.name }}/variables">Variables</a>
+    <a href="{{ base_path }}/profile/{{ profile.name }}/case">Cases</a>
+    <a href="{{ base_path }}/profile/{{ profile.name }}/landscape">Landscape</a>
+  </p>
+</div>
+{% endfor %}
+
+<h2>What the views do</h2>
+<dl class="views-list">
+  <dt>Processes and variables</dt>
+  <dd>Every process definition with instance counts, runtime distribution and terminations; plus
+    the variable catalogue: which variables ever existed per definition, how widespread they are,
+    what type they carry — <strong>without values</strong>, so the list can be handed on.</dd>
+  <dt>The case behind a business key</dt>
+  <dd>The centre of the tool: everything that happened to one business object, as a timeline
+    including the gaps in between. Instances without a key of their own, and instances with a
+    different key, belong to the case and are marked as such.</dd>
+  <dt>One process instance in detail</dt>
+  <dd>The sequence of activities, the user tasks, the BPMN model of the exact version that ran
+    with the executed activities highlighted, and the variable values to open and copy.</dd>
+  <dt>The process landscape in numbers</dt>
+  <dd>Frequencies, call graph, co-occurrence, observed transitions and how many distinct
+    sequences exist. Every number is clickable and leads to the cases behind it.</dd>
+  <dt>Marks</dt>
+  <dd>Hold on to interesting cases and instances with your own notes, exportable — without
+    variable values.</dd>
+</dl>
+
+<footer class="page-footer">
+  Credentials appear neither in this overview, nor in its HTML, nor in the repository; they are
+  resolved server-side only. Profiles file: <code>{{ profiles_file }}</code>.
+  {% if not docker_ok %}<br>Docker is not available ({{ docker_msg }}) — restoring a dump is
+  therefore not possible; databases already restored and direct connections keep working.{% endif %}
+</footer>
+{% endblock %}

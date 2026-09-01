@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% set d = detail %}
+{% block title %}Instance {{ proc_inst_id[:8] }} — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+{% if d and d.instance.business_key %}
+<p class="crumb"><a href="{{ case_url(profile.name, d.instance.business_key) }}">← case {{ d.instance.business_key }}</a></p>
+{% else %}
+<p class="crumb"><a href="{{ base_path }}/profile/{{ profile.name }}/case">← cases</a></p>
+{% endif %}
+
+{% if error %}<div class="box-error">{{ error }}</div>{% endif %}
+{% if d %}
+<h1><code>{{ d.instance.def_key }}</code> <span class="hint">v{{ d.definition_version }}</span></h1>
+<div hx-get="{{ base_path }}/marks/button?kind=instance&reference={{ proc_inst_id | urlencode }}&profile={{ profile.name | urlencode }}&context={{ (d.instance.business_key or '') | urlencode }}"
+     hx-trigger="load" hx-swap="outerHTML"><span class="hint">marks …</span></div>
+<p class="hint">
+  Instance <code>{{ d.instance.proc_inst_id }}</code>
+  {% if d.definition_name and d.definition_name != d.instance.def_key %}· {{ d.definition_name }}{% endif %}
+  · loaded in {{ d.duration_ms }} ms
+</p>
+
+<table class="kv">
+  <tr><th>Business key</th><td>
+    {% if d.instance.business_key %}<a href="{{ case_url(profile.name, d.instance.business_key) }}"><code>{{ d.instance.business_key }}</code></a>
+    {% else %}<span class="hint">none — this instance belongs to a case through its parent chain</span>{% endif %}</td></tr>
+  <tr><th>Period</th><td>{{ d.instance.start_time | datetime(profile) }}
+    {%- if d.instance.end_time %} to {{ d.instance.end_time | datetime(profile) }} · duration {{ d.instance.duration_ms | duration }}
+    {%- else %} · <strong>still running</strong>{% endif %}</td></tr>
+  <tr><th>State</th><td>{{ d.instance.state or "unknown" }}
+    {%- if d.instance.end_act_id %} · ends at <code>{{ d.instance.end_act_id }}</code>{% endif %}
+    {%- if d.instance.delete_reason %}<div class="hint">{{ d.instance.delete_reason }}</div>{% endif %}</td></tr>
+  <tr><th>Started</th><td>{{ d.instance.start_trigger.label }}
+    {%- if d.instance.start_trigger_detail %}<div class="hint">{{ d.instance.start_trigger_detail }}</div>{% endif %}</td></tr>
+  <tr><th>Hierarchy</th><td>
+    {% if d.parent %}Called by <a href="{{ instance_url(profile.name, d.parent.proc_inst_id) }}"><code>{{ d.parent.def_key }}</code></a>
+    {% else %}Root instance{% endif %}
+    {% if d.children %}<div>Calls:
+      {% for c in d.children %}<a href="{{ instance_url(profile.name, c.proc_inst_id) }}"><code>{{ c.def_key }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>{% endif %}</td></tr>
+  {% if d.open_incidents %}
+  <tr><th>Open incidents</th><td>
+    {% for kind, msg, at in d.open_incidents %}
+      <div><strong>{{ kind }}</strong> <span class="hint">{{ at | datetime(profile, with_zone=False) }}</span>
+        {% if msg %}<div class="hint">{{ msg }}</div>{% endif %}</div>
+    {% endfor %}
+    <div class="hint">Open incidents of running instances only; the incident history is written from history level FULL onwards.</div>
+  </td></tr>
+  {% endif %}
+</table>
+
+{% if d.notes %}
+<div class="box-warn">
+  {% for n in d.notes %}<p>{{ n.text }}</p>{% endfor %}
+</div>
+{% endif %}
+
+{% if model %}
+<section>
+  <h2>Model</h2>
+  {% if svg %}
+    <p class="hint">
+      {{ diagram_hint }} Highlighted are the <strong>executed activities</strong>
+      ({{ d.visited_act_ids | length }} of {{ d.activities | length }} executions).
+      The edges are deliberately unmarked: the engine does not record sequence flows, and two
+      highlighted nodes do not mean the edge between them was taken.
+    </p>
+    <div class="bpmn-tools">
+      <label><input type="checkbox" id="bpmn-fit" onchange="document.getElementById('bpmn-frame').classList.toggle('fit', this.checked)">
+        shrink to window width <span class="hint">(the labels then get small — scrolling is usually
+        the better option)</span></label>
+    </div>
+    <div class="bpmn-frame" id="bpmn-frame">{{ svg | safe }}</div>
+    <p class="hint">
+      <span class="legend legend-visited"></span> executed
+      <span class="legend legend-current"></span> still open
+      <span class="legend legend-plain"></span> not executed
+      · <a href="{{ base_path }}/profile/{{ profile.name }}/instance/{{ proc_inst_id }}/bpmn">download the BPMN (version {{ d.definition_version }})</a>
+    </p>
+  {% else %}
+    <p class="hint">{{ diagram_hint }}
+      <a href="{{ base_path }}/profile/{{ profile.name }}/instance/{{ proc_inst_id }}/bpmn">download the BPMN</a></p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section id="variables">
+  <h2>Variables <span class="hint">({{ d.variables | length }})</span></h2>
+  <p class="hint">
+    Value mode: <strong>{{ d.value_policy }}</strong> — {{ d.value_policy_reason }}
+    <strong>Clicking a value</strong> opens it in full, with a raw/formatted toggle and a copy
+    button. Large and binary values are only loaded at that point.
+  </p>
+  <form class="filterbar" onsubmit="return false">
+    <label>Filter <input type="search" id="var-filter" placeholder="name, type or value" size="26"
+      oninput="(function(q){q=q.toLowerCase();document.querySelectorAll('#var-table tbody tr').forEach(function(tr){
+        tr.hidden = q && tr.dataset.search.indexOf(q) < 0;});})(this.value)"></label>
+    <label><input type="checkbox" onchange="(function(on){
+      document.querySelectorAll('#var-table tbody tr').forEach(function(tr){
+        tr.hidden = on && tr.dataset.value !== '1';});})(this.checked)"> variables with a value only</label>
+    <span class="hint">{{ d.variables | selectattr("value_allowed") | list | length }} of
+      {{ d.variables | length }} variables are released</span>
+  </form>
+  <div class="tablewrap">
+  <table class="datatable var-table" id="var-table">
+    <thead><tr><th>Name</th><th>Value <span class="hint">(click to open)</span></th>
+      <th>Type / size</th><th>Set</th></tr></thead>
+    <tbody>
+    {% for v in d.variables %}
+      {% set target = base_path ~ "/profile/" ~ profile.name ~ "/instance/" ~ proc_inst_id ~ "/value?variable=" ~ (v.name | urlencode) ~ "&bytearray=" ~ (v.bytearray_id or "") ~ "&def_key=" ~ (d.instance.def_key | urlencode) %}
+      <tr data-search="{{ (v.name ~ ' ' ~ (v.var_type or '') ~ ' ' ~ (v.java_class or '') ~ ' ' ~ (v.value_shown or '')) | lower }}"
+          data-value="{{ '1' if (v.value_shown is not none or v.value_on_request) else '0' }}">
+        <td class="var-name"><code>{{ v.name }}</code>
+          <div class="hint">{{ v.scope }}</div></td>
+        <td class="value-cell">
+          {% if not v.value_allowed %}
+            <span class="hint">🔒 {{ v.value_reason or "hidden" }}</span>
+          {% elif v.var_type == "null" %}
+            <span class="hint">no value (type <code>null</code>)</span>
+          {% else %}
+            {# A real link: without JavaScript it leads to a page showing the value, with
+               JavaScript it opens the dialog. #}
+            {% set json_url = base_path ~ "/profile/" ~ profile.name ~ "/instance/" ~ proc_inst_id ~ "/value.json?variable=" ~ (v.name | urlencode) %}
+            <span class="value-row">
+              {# Copying always copies the FULL value: if the preview is complete, straight from
+                 the page, otherwise the value is fetched for it first. #}
+              <button type="button" class="copy-button" title="copy the value to the clipboard"
+                      aria-label="copy the value"
+                      {% if v.value_shown is not none and not v.value_truncated %}data-text="{{ v.value_shown }}"
+                      {% else %}data-url="{{ json_url }}"{% endif %}>
+                <svg aria-hidden="true" focusable="false"><use href="#icon-copy"/></svg>
+              </button>
+              <a class="value-button" href="{{ target }}"
+                 onclick="if (window.openValue) { openValue('{{ json_url }}', {{ v.name | tojson }}, {{ (v.var_type or '') | tojson }}); return false; } return true;">
+                {%- if v.value_shown is not none -%}
+                  <span class="preview">{{ v.value_shown[:120] }}{% if v.value_shown | length >= 120 %} …{% endif %}</span>
+                {%- else -%}
+                  <span class="preview empty">{{ "open the binary value" if v.in_bytearray else "open the value" }} →</span>
+                {%- endif -%}
+              </a>
+            </span>
+          {% endif %}
+        </td>
+        <td class="hint">{{ v.var_type or "—" }}
+          {%- if v.size_bytes is not none %} · {% if v.in_bytearray %}{{ v.size_bytes | bytes_size }}{% else %}{{ v.size_bytes }} chars{% endif %}{% endif %}
+          {%- if v.java_class %}<div><code>{{ v.java_class }}</code></div>{% endif %}</td>
+        <td class="hint">{{ v.create_time | datetime(profile, with_zone=False) }}
+          {%- if v.act_id %}<div>at <code>{{ v.act_id }}</code></div>
+          {%- else %}<div>at instance start</div>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Activities <span class="hint">({{ d.activities | length }} activity executions)</span></h2>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th>Start</th><th class="num">Duration</th><th>Type</th><th>Activity</th>
+      <th class="num">seq</th><th>Assignee</th><th>Call / task</th></tr></thead>
+    <tbody>
+    {% for a in d.activities %}
+      <tr>
+        <td>{{ a.start_time | datetime(profile, with_zone=False) }}
+          {%- if a.order_ambiguous %} <span class="tag" title="same start time and no sequence counter — order undetermined">≈</span>{% endif %}</td>
+        <td class="num">{% if a.is_open %}<span class="tag tag-run">open</span>{% else %}{{ a.duration_ms | duration }}{% endif %}</td>
+        <td class="hint">{{ a.act_type }}</td>
+        <td>{{ a.act_name or "" }}<div class="hint"><code>{{ a.act_id }}</code></div></td>
+        <td class="num hint">{{ a.sequence_counter if a.sequence_counter is not none else "" }}</td>
+        <td>{{ a.assignee or "" }}</td>
+        <td class="hint">
+          {% if a.call_proc_inst_id %}<a href="{{ instance_url(profile.name, a.call_proc_inst_id) }}">view the subprocess</a>{% endif %}
+          {% if a.task_id %}task {{ a.task_id[:8] }}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>User tasks <span class="hint">({{ d.tasks | length }})</span></h2>
+  {% if d.tasks %}
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr><th>Task</th><th>Assignee</th><th>Created</th><th>Ended</th>
+        <th class="num">Duration</th><th>Due</th><th>State</th></tr></thead>
+      <tbody>
+      {% for t in d.tasks %}
+        <tr>
+          <td>{{ t.name or t.task_def_key or "" }}<div class="hint"><code>{{ t.task_def_key }}</code></div></td>
+          <td>{{ t.assignee or "—" }}{% if t.owner and t.owner != t.assignee %}<div class="hint">owner {{ t.owner }}</div>{% endif %}</td>
+          <td>{{ t.start_time | datetime(profile, with_zone=False) }}</td>
+          <td>{{ t.end_time | datetime(profile, with_zone=False) }}</td>
+          <td class="num">{{ t.duration_ms | duration }}</td>
+          <td>{{ t.due_date | datetime(profile, with_zone=False) }}</td>
+          <td>{{ t.task_state or "" }}{% if t.delete_reason %}<div class="hint">{{ t.delete_reason }}</div>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if d.tasks and not d.tasks[0].claim_time_available %}
+      <p class="box-warn">{{ d.tasks[0].lifecycle_note }}</p>
+    {% endif %}
+  {% else %}
+    <p class="empty-hint">This instance has no user task.</p>
+  {% endif %}
+</section>
+
+<dialog id="value-dialog" class="value-dialog">
+  <header>
+    <strong id="value-name"></strong> <span class="hint" id="value-type"></span>
+    <span class="dialog-buttons">
+      <button type="button" id="value-mode" class="small" hidden>show raw</button>
+      <button type="button" id="value-copy" class="small">copy</button>
+      <button type="button" id="value-close" class="small">close</button>
+    </span>
+  </header>
+  <p class="hint" id="value-meta"></p>
+  <pre id="value-content" tabindex="0"></pre>
+</dialog>
+
+<footer class="page-footer">
+  Times shown in {{ profile.display_timezone }}, database values in {{ profile.source_timezone }}.
+  The order of simultaneous activities is decided by <code>sequence_counter_</code>; where that is
+  missing too, the order is marked as undetermined with ≈.
+</footer>
+{% endif %}
+{% endblock %}

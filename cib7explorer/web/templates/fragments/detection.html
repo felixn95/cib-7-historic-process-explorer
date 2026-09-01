@@ -1,0 +1,217 @@
+{# Fragment: served by /profile/{name}/detection (GET) and /profile/{name}/detection/rebuild
+   (POST), loaded into #detection-content without blocking the page.
+   It also updates three parts of the persistent header via hx-swap-oob="true" (ro-status,
+   history-level-status, cache-age), which cannot be known during the first render unless the
+   whole page waits for the detection. #}
+
+<div id="ro-status" hx-swap-oob="true" class="topbar-item">
+  {% if proof %}
+    read-only: {{ "OK" if proof.ok and proof.privileges_clean else "caution" }}
+    {% if not proof.privileges_clean %}<span class="hint">— {{ proof.summary }}</span>{% endif %}
+  {% else %}
+    read-only: not determined (no connection)
+  {% endif %}
+</div>
+
+<div id="history-level-status" hx-swap-oob="true" class="topbar-item">
+  {% if det and det.history_level %}
+    History level: <strong>{{ det.history_level.label }} ({{ det.history_level.value }})</strong>
+    <a href="#not-recorded">→ what is missing because of it</a>
+  {% elif det %}
+    History level: not determined{% if det.history_level_raw %} (raw value: {{ det.history_level_raw }}){% endif %}
+  {% else %}
+    History level: not determined
+  {% endif %}
+</div>
+
+<div id="cache-age" hx-swap-oob="true" class="topbar-item">
+  {% if as_of %}
+    Detected {{ as_of | datetime(profile) }}{% if from_cache %} (from cache){% else %} (just now){% endif %}
+  {% else %}
+    Detection failed
+  {% endif %}
+</div>
+
+{% if error %}
+<div class="box-error">
+  <strong>Connection or detection failed.</strong>
+  <p>{{ error }}</p>
+</div>
+<button hx-post="{{ base_path }}/profile/{{ profile.name }}/detection/rebuild" hx-target="#detection-content" hx-swap="innerHTML">
+  Try again
+</button>
+
+{% else %}
+
+<p class="hint">
+  {% if from_cache %}From the cache -- as of {{ as_of | datetime(profile) }}.{% else %}Just determined.{% endif %}
+  {% if det.duration_ms is not none %}Detection took {{ det.duration_ms | num }} ms.{% endif %}
+</p>
+<button hx-post="{{ base_path }}/profile/{{ profile.name }}/detection/rebuild" hx-target="#detection-content" hx-swap="innerHTML">
+  Detect again (discard cache)
+</button>
+
+<h3>1. Header</h3>
+<div class="card">
+  <dl class="kv grid">
+    <div><dt>Server version</dt><dd>{{ det.server_version or "not determined" }}</dd></div>
+    <div><dt>Database</dt><dd>{{ det.database_name or "not determined" }}</dd></div>
+    <div><dt>Connected user</dt><dd>{{ det.connected_as or "not determined" }}</dd></div>
+    <div><dt>Installation id</dt><dd>{{ det.installation_id or "not determined" }}</dd></div>
+    <div><dt>Engine schema version</dt><dd>{{ det.engine_schema_version or "not determined" }}</dd></div>
+    <div><dt>History level</dt>
+      <dd>{% if det.history_level %}{{ det.history_level.label }} ({{ det.history_level.value }}){% else %}not determined{% if det.history_level_raw %} (raw: {{ det.history_level_raw }}){% endif %}{% endif %}</dd>
+    </div>
+    <div><dt>Tenant ids (shown for information, not used as a dimension)</dt>
+      <dd>
+        {% if det.tenant_ids %}
+          {{ det.tenant_ids | map("string") | join(", ") }}
+        {% else %}
+          none (empty or constant, as is typical for single-tenant deployments)
+        {% endif %}
+      </dd>
+    </div>
+  </dl>
+  {% if det.schema_log or det.flyway_migrations %}
+  <details style="margin-top:10px;">
+    <summary class="hint">Raw schema and migration history</summary>
+    {% if det.schema_log %}
+    <p class="hint">act_ge_schema_log:</p>
+    <ul>{% for ver, ts in det.schema_log %}<li>{{ ver }} — {{ ts | datetime(profile) if ts else "no timestamp" }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% if det.flyway_migrations %}
+    <p class="hint">Flyway:</p>
+    <ul>{% for ver, desc, ts in det.flyway_migrations %}<li>{{ ver }} {{ desc }} — {{ ts | datetime(profile) if ts else "no timestamp" }}</li>{% endfor %}</ul>
+    {% endif %}
+  </details>
+  {% endif %}
+</div>
+
+<h3>2. Schema check</h3>
+{% if not det.deviations %}
+<div class="box-ok">
+  The schema matches the expected CIB seven / Camunda 7 layout across every checked table.
+</div>
+{% else %}
+<div class="deviation-box">
+  <h3>⚠ {{ det.deviations | length }} schema deviation(s) -- stated plainly, not swallowed</h3>
+  <table>
+    <thead><tr><th>Table</th><th>Kind</th><th>Detail</th></tr></thead>
+    <tbody>
+      {% for d in det.deviations %}
+      <tr><td>{{ d.table }}</td><td>{{ d.kind }}</td><td>{{ d.detail }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<h3>3. History window</h3>
+<div class="card">
+  {% set hw = det.history_window %}
+  {% if hw %}
+  <dl class="kv grid">
+    <div><dt>First instance</dt><dd>{{ hw.first_start | datetime(profile) if hw.first_start else "not determined" }}</dd></div>
+    <div><dt>Last instance (start)</dt><dd>{{ hw.last_start | datetime(profile) if hw.last_start else "not determined" }}</dd></div>
+    <div><dt>Last end</dt><dd>{{ hw.last_end | datetime(profile) if hw.last_end else "not determined" }}</dd></div>
+    <div><dt>Running instances</dt><dd>{{ hw.running_instances | num if hw.running_instances is not none else "not determined" }}</dd></div>
+    <div><dt>History cleanup, removal_time_ (min)</dt><dd>{{ hw.removal_time_min | datetime(profile) if hw.removal_time_min else "not determined" }}</dd></div>
+    <div><dt>History cleanup, removal_time_ (max)</dt><dd>{{ hw.removal_time_max | datetime(profile) if hw.removal_time_max else "not determined" }}</dd></div>
+    <div><dt>Rows past their removal time</dt>
+      <dd>{{ hw.rows_past_removal_time | num if hw.rows_past_removal_time is not none else "not determined" }}
+        {% if hw.rows_past_removal_time %}<span class="hint">— history cleanup has not caught up here yet</span>{% endif %}
+      </dd>
+    </div>
+    <div><dt>Instances without removal_time_</dt><dd>{{ hw.instances_without_removal_time | num if hw.instances_without_removal_time is not none else "not determined" }}</dd></div>
+  </dl>
+  <p class="hint">
+    Worth keeping in mind: cases whose first instance began before
+    {{ hw.first_start | datetime(profile) if hw.first_start else "the start of this history" }}, or
+    that are still running, are visible here only as a fragment -- their real beginning or their
+    end lies outside the window this database still holds. An empty stretch before the start of
+    the window does not mean "nothing happened", it means "no longer present, or not yet".
+  </p>
+  {% else %}
+  <p class="muted">not determined</p>
+  {% endif %}
+</div>
+
+<h3 id="capabilities">4. Capabilities</h3>
+<div class="card feature-columns">
+  <div>
+    <h4>Present</h4>
+    <ul>
+      {% for f in det.features if f.available %}
+      <li>{{ feature_labels.get(f.feature, f.feature.value) }}
+        <span class="hint">({{ f.table }}{% if f.est_rows is not none %}, ~{{ f.est_rows | num }} rows, estimated{% endif %})</span>
+      </li>
+      {% else %}
+      <li class="muted">none</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div id="not-recorded">
+    <h4>Not recorded</h4>
+    <ul class="feature-missing">
+      {% for f in det.features if not f.available %}
+      <li>{{ feature_labels.get(f.feature, f.feature.value) }}
+        <span class="reason">{{ f.reason or "no reason given" }}</span>
+      </li>
+      {% else %}
+      <li class="muted">none -- every known capability is recorded</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<h3>5. Tables</h3>
+<div class="card">
+  <p class="hint">Row counts are estimates from <code>pg_class.reltuples</code>, never
+    <code>count(*)</code> on production data. Largest first.</p>
+  <table>
+    <thead><tr><th>Table</th><th>Rows (estimate)</th><th>Size</th><th>Holds rows</th></tr></thead>
+    <tbody>
+      {% for t in sorted_tables %}
+      <tr>
+        <td>{{ t.name }}{% if not t.exists %} <span class="hint">(missing)</span>{% endif %}</td>
+        <td>{{ t.est_rows | num if t.est_rows is not none else "not determined" }}</td>
+        <td>{{ t.total_bytes | bytes_size if t.total_bytes is not none else "not determined" }}</td>
+        <td>{{ "yes" if t.has_rows else ("no" if t.has_rows is not none else "not determined") }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h3>6. Time zone evidence</h3>
+<div class="card">
+  {% set tz = det.timezone %}
+  {% if tz %}
+  <dl class="kv grid">
+    <div><dt>Server time (db_now)</dt><dd>{{ tz.db_now | datetime(profile) if tz.db_now else "not determined" }}</dd></div>
+    <div><dt>Database time zone setting</dt><dd>{{ tz.db_timezone_setting or "not determined" }}</dd></div>
+    <div><dt>Most recent history timestamp</dt><dd>{{ tz.latest_history_timestamp | datetime(profile) if tz.latest_history_timestamp else "not determined" }}</dd></div>
+    <div><dt>Distance to db_now</dt><dd>{{ tz.lag_to_db_now_seconds | ago }}</dd></div>
+    <div><dt>Configured source zone</dt><dd>{{ tz.configured_source_timezone }}</dd></div>
+    <div><dt>Configured display zone</dt><dd>{{ tz.configured_display_timezone }}</dd></div>
+  </dl>
+  {% if tz.start_hour_histogram %}
+  {% set maxv = tz.start_hour_histogram.values() | list | max %}
+  <p class="hint" style="margin-top:14px;">Hour-of-day distribution of instance starts (display zone, 0–23):</p>
+  <div class="hist-bars">
+    {% for h in range(24) %}
+    {% set v = tz.start_hour_histogram.get(h, 0) %}
+    <div class="hist-bar" style="height: {{ (1 + 99 * v / maxv) | round | int if maxv else 1 }}%;" title="{{ h }}:00 — {{ v | num }}">
+      <span>{{ h }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">No hour histogram could be determined.</p>
+  {% endif %}
+  {% else %}
+  <p class="muted">not determined</p>
+  {% endif %}
+</div>
+
+{% endif %}

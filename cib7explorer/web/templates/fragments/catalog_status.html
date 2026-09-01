@@ -1,0 +1,27 @@
+{# State of the catalogue build job. Polls itself every 2 s while it is not terminal. #}
+<div id="catalog-status"
+     {% if job and not job.is_terminal %}hx-get="{{ base_path }}/profile/{{ profile.name }}/catalog/status" hx-trigger="load delay:2s" hx-swap="outerHTML"{% endif %}>
+  {% if not job %}
+    <p class="empty-hint">No catalogue build known.</p>
+  {% elif job.phase == "running" %}
+    <p>
+      <strong>Building the catalogue …</strong>
+      {% if job.percent is not none %}<span class="pct">{{ job.percent }} %</span>{% endif %}
+      <span class="hint">{{ job.message }}</span>
+    </p>
+    <div class="bar"><div class="bar-fill" style="width: {{ job.percent or 0 }}%"></div></div>
+    <p class="hint">running for {{ job.duration_ms | duration }} · you can leave this page, the build continues</p>
+  {% elif job.phase == "done" %}
+    <p class="ok"><strong>Catalogue finished</strong> — {{ job.result_summary }}
+      <span class="hint">in {{ job.duration_ms | duration }}</span></p>
+    <p><a href="">Reload the page</a> to see the numbers.</p>
+  {% elif job.phase == "failed" %}
+    <p class="warn"><strong>Build failed:</strong> {{ job.error }}</p>
+  {% else %}
+    <p>Build queued …</p>
+  {% endif %}
+  <form method="post" action="{{ base_path }}/profile/{{ profile.name }}/catalog/rebuild"
+        hx-post="{{ base_path }}/profile/{{ profile.name }}/catalog/rebuild" hx-target="#catalog-status" hx-swap="outerHTML">
+    <button type="submit">Rebuild</button>
+  </form>
+</div>

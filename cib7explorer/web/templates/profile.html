@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ profile.name }} -- Process Explorer{% endblock %}
+
+{% block header %}
+<span class="badge badge-{{ profile.classification.value }}">{{ profile.name }} · {{ profile.classification.value }}</span>
+<span class="topbar-item" id="ro-status">read-only: checked while connecting …</span>
+<span class="topbar-item" id="history-level-status">history level: determining …</span>
+<span class="topbar-item">Time: displayed in {{ profile.display_timezone }} — database values in {{ profile.source_timezone }}</span>
+<span class="topbar-item">
+  Values {{ "ON" if profile.values_mode_effective else "OFF" }}
+  {% if not profile.values_mode_effective and profile.values_mode_locked_reason %}
+    <span class="hint">({{ profile.values_mode_locked_reason }})</span>
+  {% endif %}
+</span>
+<span class="topbar-item" id="cache-age">no detection loaded yet</span>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/definitions">Processes</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/variables">Variables</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/case">Cases</a>
+<a class="topbar-item" href="{{ base_path }}/profile/{{ profile.name }}/landscape">Landscape</a>
+<a class="topbar-item" href="{{ base_path }}/marks">Marks</a>
+{% endblock %}
+
+{% block content %}
+<h1>{{ profile.name }}</h1>
+<p class="hint">
+  Target: <code>{{ profile.host }}:{{ profile.port }}/{{ profile.database }}</code>
+  schema <code>{{ profile.schema }}</code>
+  as <code>{{ profile.user }}</code> · kind: {{ profile.kind.value }}
+  · the password is resolved server-side and appears nowhere on this page.
+</p>
+
+{% if profile.kind.value == "local_restore" %}
+<h2>Restore</h2>
+<div id="restore-status" hx-get="{{ base_path }}/profile/{{ profile.name }}/restore/status" hx-trigger="load" hx-swap="outerHTML">
+  loading restore status …
+</div>
+{% endif %}
+
+<h2>Views</h2>
+<ul class="views">
+  <li><a href="{{ base_path }}/profile/{{ profile.name }}/definitions"><strong>Process definitions</strong></a>
+      <span class="hint">What is here at all: every process definition with instance counts,
+      runtime distribution, terminations, validation runs and business keys.</span></li>
+  <li><a href="{{ base_path }}/profile/{{ profile.name }}/variables"><strong>Variable catalogue</strong></a>
+      <span class="hint">Every process variable that ever occurred, without values, with share,
+      type switches, where it was first written, scope and sizes. Exportable as CSV.</span></li>
+  <li><a href="{{ base_path }}/profile/{{ profile.name }}/variables/cross-process">Cross-process names</a>
+      <span class="hint">Variable names occurring in more than one definition — candidates for a
+      shared object reference.</span></li>
+  <li><a href="{{ base_path }}/profile/{{ profile.name }}/case"><strong>Cases</strong></a>
+      <span class="hint">The centre of the tool: everything that happened to one business object,
+      as a timeline including the gaps. Search and a browse list to find cases.</span></li>
+  <li><a href="{{ base_path }}/profile/{{ profile.name }}/landscape"><strong>Process landscape in numbers</strong></a>
+      <span class="hint">Frequencies, call graph, co-occurrence, observed transitions, sequence
+      variety, distributions — every number clickable down to the cases behind it.</span></li>
+  <li><a href="{{ base_path }}/marks"><strong>Marks</strong></a>
+      <span class="hint">Marked cases and instances with your own notes, exportable, without
+      variable values.</span></li>
+  <li class="hint">The detail view of a single process instance is reached from the case view --
+      every process name and every instance id there leads into it.</li>
+</ul>
+
+<h2>Detection</h2>
+<div id="detection-content"
+     hx-get="{{ base_path }}/profile/{{ profile.name }}/detection"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+  connecting and inspecting … (this does not block the page)
+</div>
+
+<footer class="page-footer">
+  Guard rails of this profile: statement timeout {{ profile.statement_timeout_ms }} ms,
+  row limit {{ profile.row_limit | num }} rows per query.
+</footer>
+{% endblock %}

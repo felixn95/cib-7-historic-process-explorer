@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% set base = base_path ~ "/profile/" ~ profile.name ~ "/variables" %}
+{% set extra = "&q=" ~ q ~ "&def_key=" ~ def_key ~ "&type_change=" ~ type_change ~ "&min_share=" ~ min_share ~ "&scope=" ~ scope %}
+{% block title %}Variables — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+<h1>Variable catalogue</h1>
+<p class="notice">
+  <strong>This page shows no variable values</strong> — only names, types, timestamps,
+  frequencies and sizes. Not even when the value mode is switched on. The output can therefore be
+  handed to anyone without values travelling along.
+</p>
+
+<nav class="tabs">
+  <a href="{{ base }}" class="{{ 'active' if mode == 'catalog' }}">Catalogue per definition</a>
+  <a href="{{ base }}/cross-process" class="{{ 'active' if mode == 'cross_process' }}">Cross-process names</a>
+</nav>
+
+{{ k.as_of(profile, has_data, built_at, age_ago, meta, job, cache_error) }}
+
+{% if has_data and mode == "catalog" %}
+<form method="get" action="{{ base }}" class="filterbar">
+  <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ dir }}">
+  <label>Name <input type="search" name="q" value="{{ q }}" placeholder="variable name or part of it"></label>
+  <label>Definition <input type="search" name="def_key" value="{{ def_key }}" placeholder="definition key"></label>
+  <label>Minimum share % <input type="text" name="min_share" value="{{ min_share }}" size="4" placeholder="90"></label>
+  <label>Scope
+    <select name="scope">
+      <option value="all" {{ "selected" if scope == "all" }}>all</option>
+      <option value="instance" {{ "selected" if scope == "instance" }}>process instance</option>
+      <option value="below_instance" {{ "selected" if scope == "below_instance" }}>below the instance</option>
+      <option value="task" {{ "selected" if scope == "task" }}>task-local</option>
+    </select>
+  </label>
+  <label><input type="checkbox" name="type_change" value="1" {{ "checked" if type_change == "1" }}> type switches only</label>
+  <button type="submit">Filter</button>
+  <a class="btn-link" href="{{ base }}">reset</a>
+  <a class="btn-link" href="{{ base }}.csv?{{ extra[1:] }}&sort={{ sort }}&dir={{ dir }}">as CSV</a>
+</form>
+
+<p class="count">
+  <strong>{{ total_filtered | num }}</strong> of {{ total_all | num }} catalogue rows
+  · page {{ page }} of {{ total_pages }} ({{ page_size }} per page)
+</p>
+
+<div class="tablewrap">
+<table class="datatable">
+  <thead><tr>
+    {{ k.th("Definition", "def_key", sort, dir, base, extra) }}
+    {{ k.th("Variable", "name", sort, dir, base, extra) }}
+    <th>Type(s)</th>
+    {{ k.th("Present in", "share", sort, dir, base, extra, cls="num") }}
+    <th class="num">With a value</th>
+    {{ k.th("Occurrences", "occurrences", sort, dir, base, extra, cls="num") }}
+    <th>First written</th>
+    <th>Scope</th>
+    <th>Size / serialisation</th>
+    {{ k.th("First seen", "first_seen", sort, dir, base, extra) }}
+    {{ k.th("Last seen", "last_seen", sort, dir, base, extra) }}
+  </tr></thead>
+  <tbody>
+  {% for v in rows %}
+    <tr>
+      <td><a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ v.def_key }}"><code>{{ v.def_key }}</code></a></td>
+      <td><code>{{ v.name }}</code>
+        <a class="hint" href="{{ base }}?q={{ v.name }}" title="which definitions this name occurs in">↗</a></td>
+      <td>{{ v.types | join(", ") }}
+        {% if v.type_switch %}<div><span class="tag tag-warn">type switch</span></div>{% endif %}</td>
+      <td class="num">{{ v.instances_with | fraction(v.def_instances) }}</td>
+      <td class="num">
+        {% if v.null_typed %}{{ (v.occurrences - v.null_typed) | fraction(v.occurrences) }}
+          <div class="hint">{{ v.null_typed | num }}× type <code>null</code></div>
+        {% else %}all{% endif %}
+      </td>
+      <td class="num">{{ v.occurrences | num }}</td>
+      <td class="hint">
+        {% if v.first_write_activities %}
+          {% for a in v.first_write_activities[:2] %}<div><code>{{ a.act_id }}</code> {{ a.act_type }}</div>{% endfor %}
+          {% if v.first_write_at_instance_level %}<div>{{ v.first_write_at_instance_level | num }}× at instance start</div>{% endif %}
+        {% else %}at instance start{% endif %}
+        {% if v.from_call_activity %}<div><span class="tag tag-note">via call activity</span></div>{% endif %}
+      </td>
+      <td class="hint">
+        {%- if v.scope_task_local %}task-local
+        {%- elif v.scope_below_process_instance %}also below the instance
+        {%- else %}process instance{% endif %}
+        {%- if v.instances_multi_scope %}<div>{{ v.instances_multi_scope | num }} instances more than once (scopes)</div>{% endif %}
+      </td>
+      <td class="hint">
+        {% if v.bytearray_size.n %}median {{ v.bytearray_size.p50 | bytes_size }}, max {{ v.bytearray_size.maximum | bytes_size }}{% endif %}
+        {% if v.inline_size.n and not v.bytearray_size.n %}median {{ v.inline_size.p50 }} chars, max {{ v.inline_size.maximum }} chars{% endif %}
+        {% for s in v.serialization[:2] %}<div>{{ s.var_type }}{% if s.java_class %} <code>{{ s.java_class }}</code>{% endif %}
+          {% if s.resolvable_without_application is false %}<span class="tag tag-warn">not resolvable</span>{% endif %}</div>{% endfor %}
+      </td>
+      <td class="hint">{{ v.first_seen | datetime(profile, with_zone=False) }}</td>
+      <td class="hint">{{ v.last_seen | datetime(profile, with_zone=False) }}
+        {% if v.in_latest_used_version is false %}<div><span class="tag">not in the newest version</span></div>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="11" class="empty-hint">No match for this filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if total_pages > 1 %}
+<nav class="pager">
+  {% if page > 1 %}<a href="{{ base }}?sort={{ sort }}&dir={{ dir }}{{ extra }}&page={{ page - 1 }}">← previous</a>{% endif %}
+  <span>page {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}<a href="{{ base }}?sort={{ sort }}&dir={{ dir }}{{ extra }}&page={{ page + 1 }}">next →</a>{% endif %}
+</nav>
+{% endif %}
+
+{% elif has_data and mode == "cross_process" %}
+<p class="hint">
+  Names occurring in more than one process definition — <strong>candidates</strong> for a shared
+  object reference, no more than that. Whether two identically named variables mean the same thing
+  is not something the data says. A type conflict means: same name, different technical types.
+</p>
+<p class="count"><strong>{{ cross_rows | length | num }}</strong> names in more than one definition
+  <span class="hint">(out of {{ total_all | num }} catalogue rows)</span></p>
+<div class="tablewrap">
+<table class="datatable">
+  <thead><tr>
+    {{ k.th("Name", "name", sort, dir, base ~ "/cross-process") }}
+    {{ k.th("Definitions", "def_count", sort, dir, base ~ "/cross-process", cls="num") }}
+    {{ k.th("Occurrences", "occurrences", sort, dir, base ~ "/cross-process", cls="num") }}
+    <th class="num">Instances</th><th>Types</th><th>Occurring in</th>
+  </tr></thead>
+  <tbody>
+  {% for c in cross_rows %}
+    <tr>
+      <td><code>{{ c.name }}</code></td>
+      <td class="num">{{ c.def_count | num }}</td>
+      <td class="num">{{ c.occurrences | num }}</td>
+      <td class="num">{{ c.instances_with | num }}</td>
+      <td>{{ c.types | join(", ") }}
+        {% if c.type_conflict %}<div><span class="tag tag-warn">type conflict</span></div>{% endif %}</td>
+      <td class="hint">
+        {% for dk in c.definitions[:6] %}<a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ dk }}"><code>{{ dk }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}
+        {% if c.definitions | length > 6 %} <a href="{{ base }}?q={{ c.name }}">… show all {{ c.def_count }}</a>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<footer class="page-footer">
+  “Present in” is the share of instances of that definition in which the variable occurs at all;
+  “with a value” is a different thing — variables with the technical type <code>null</code> exist
+  but carry nothing. “Instances more than once (scopes)” means several variable instances of the
+  same name within one process instance (multi-instance loops, subprocesses) and <em>not</em>
+  “overwritten”: whether a value was overwritten would live in <code>act_hi_detail</code>, and
+  that table is empty at history level AUDIT.
+</footer>
+{% endblock %}

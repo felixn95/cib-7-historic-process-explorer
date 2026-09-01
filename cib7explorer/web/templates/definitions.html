@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% set base = base_path ~ "/profile/" ~ profile.name ~ "/definitions" %}
+{% set extra = "&q=" ~ q ~ "&role=" ~ role ~ "&ran=" ~ ran %}
+{% block title %}Processes — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+<h1>Process definitions</h1>
+<p class="hint">
+  What is here at all? Every process definition that appears in the history, plus the ones that
+  are deployed and never ran. Ordered by practical relevance, not alphabetically.
+</p>
+
+{{ k.as_of(profile, has_data, built_at, age_ago, meta, job, cache_error) }}
+
+{% if has_data %}
+<form method="get" action="{{ base }}" class="filterbar">
+  <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ dir }}">
+  <label>Search <input type="search" name="q" value="{{ q }}" placeholder="key or name"></label>
+  <label>Role
+    <select name="role">
+      <option value="all" {{ "selected" if role == "all" }}>all</option>
+      <option value="root_only" {{ "selected" if role == "root_only" }}>root only</option>
+      <option value="child_only" {{ "selected" if role == "child_only" }}>subprocess only</option>
+      <option value="both" {{ "selected" if role == "both" }}>both</option>
+    </select>
+  </label>
+  <label>Instances
+    <select name="ran">
+      <option value="all" {{ "selected" if ran == "all" }}>all</option>
+      <option value="with_instances" {{ "selected" if ran == "with_instances" }}>have run</option>
+      <option value="without_instances" {{ "selected" if ran == "without_instances" }}>deployed, never ran</option>
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+  <a class="btn-link" href="{{ base }}">reset</a>
+  <a class="btn-link" href="{{ base }}.csv?q={{ q }}&role={{ role }}&ran={{ ran }}">as CSV</a>
+</form>
+
+<p class="count">
+  <strong>{{ total | num }}</strong> of {{ total_unfiltered | num }} definitions
+  {% if q or role != "all" or ran != "all" %}<span class="hint">(filtered)</span>{% endif %}
+</p>
+
+<div class="tablewrap">
+<table class="datatable">
+  <thead>
+    <tr>
+      {{ k.th("Definition", "key", sort, dir, base, extra) }}
+      {{ k.th("Instances", "instances", sort, dir, base, extra, cls="num") }}
+      {{ k.th("of those validation only", "validation", sort, dir, base, extra, cls="num") }}
+      <th class="num">Root / subprocess</th>
+      <th class="num">Versions</th>
+      {{ k.th("First", "first", sort, dir, base, extra) }}
+      {{ k.th("Last", "last", sort, dir, base, extra) }}
+      <th class="num">Completed</th>
+      {{ k.th("Terminated", "terminated", sort, dir, base, extra, cls="num") }}
+      {{ k.th("Runtime (median)", "duration", sort, dir, base, extra, cls="num") }}
+      <th class="num">Runtime p90</th>
+      {{ k.th("Incidents (open)", "incidents", sort, dir, base, extra, cls="num") }}
+      <th class="num">validationOnly</th>
+      <th class="num">User tasks</th>
+      <th class="num">Business keys</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for d in rows %}
+    <tr>
+      <td>
+        <a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ d.key }}"><code>{{ d.key }}</code></a>
+        {% if d.name and d.name != d.key %}<div class="hint">{{ d.name }}</div>{% endif %}
+        {% if not d.deployed %}<span class="tag tag-warn">historic only, no longer deployed</span>{% endif %}
+        {% if d.instances == 0 %}<span class="tag">deployed, never ran</span>{% endif %}
+      </td>
+      <td class="num">{{ d.instances | num }}</td>
+      <td class="num">
+        {% if d.validation_flag_true is none %}<span class="hint">not determined</span>
+        {% elif d.validation_flag_true %}
+          {{ d.validation_flag_true | fraction(d.instances) }}
+          {% if (d.validation_flag_share or 0) > 0.9 %}<div><span class="tag tag-warn">almost only dry runs</span></div>{% endif %}
+          {% if d.validation_flag_undecidable %}<div class="hint">{{ d.validation_flag_undecidable | num }} undecidable</div>{% endif %}
+          {% if d.validation_flag_not_at_start %}<div class="hint">{{ d.validation_flag_not_at_start | num }}× marked only inside the process</div>{% endif %}
+        {% else %}0{% endif %}
+      </td>
+      <td class="num">
+        {{ d.instances_as_root | num }} / {{ d.instances_as_child | num }}
+        {% if d.both_roles %}<span class="tag tag-note">both</span>
+        {% elif d.only_as_child %}<span class="tag">subprocess only</span>{% endif %}
+      </td>
+      <td class="num">
+        {{ d.versions_used | num }} used
+        {% if d.deployed_versions %}<div class="hint">{{ d.deployed_versions | num }} deployed, newest v{{ d.latest_deployed_version }}</div>{% endif %}
+      </td>
+      <td>{{ d.first_start | datetime(profile, with_zone=False) }}</td>
+      <td>{{ d.last_start | datetime(profile, with_zone=False) }}</td>
+      <td class="num">
+        {% if d.instances %}{{ d.completed | fraction(d.instances) }}{% else %}—{% endif %}
+        {% if d.active %}<div class="hint">{{ d.active | num }} running</div>{% endif %}
+      </td>
+      <td class="num">
+        {% set term = d.externally_terminated + d.internally_terminated %}
+        {% if d.instances %}{{ term | fraction(d.instances) }}{% else %}—{% endif %}
+        {% if d.externally_terminated %}<div class="hint">{{ d.externally_terminated | num }} from outside</div>{% endif %}
+      </td>
+      <td class="num">{{ d.duration.p50 | duration }}
+        <div class="hint">n={{ d.duration.n | num }}{% if d.duration.n_unfinished %}, {{ d.duration.n_unfinished | num }} without a duration{% endif %}</div>
+      </td>
+      <td class="num">{{ d.duration.p90 | duration }}</td>
+      <td class="num">
+        {% if d.open_incidents is none %}<span class="hint">not recorded</span>
+        {% else %}{{ d.open_incidents | num }}{% endif %}
+        <div class="hint">
+          {% if d.historic_incidents is none %}History: not recorded{% else %}History: {{ d.historic_incidents | num }}{% endif %}
+        </div>
+      </td>
+      <td class="num">
+        {{ d.validation_only_instances | num }}
+        {% if d.validation_related_instances != d.validation_only_instances %}
+          <div class="hint">{{ d.validation_related_instances | num }} validation-related</div>
+        {% endif %}
+      </td>
+      <td class="num">
+        {% if d.user_task_instances is none %}<span class="hint">not recorded</span>
+        {% else %}{{ d.user_task_instances | num }}
+          {% if d.distinct_assignees %}<div class="hint">{{ d.distinct_assignees }} assignees</div>{% endif %}
+        {% endif %}
+      </td>
+      <td class="num">{{ d.distinct_business_keys | num }}
+        {% if d.instances_without_business_key %}<div class="hint">{{ d.instances_without_business_key | num }} without a key</div>{% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="15" class="empty-hint">No match for this filter.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<footer class="page-footer">
+  Runtimes are distributions (median and p90), deliberately not averages — for process runtimes an
+  average hides the distribution it came from. “Incidents (open)” are open incidents of running
+  instances from <code>act_ru_incident</code>; the incident <em>history</em> is only written at
+  history level FULL, which is why that column says “not recorded” rather than 0.
+  “Of those validation only” counts instances whose <strong>input parameter</strong>
+  <code>onlyValidation</code> is true at instance start. Deliberately only the input parameter:
+  some processes set the same variable internally later on, where it means something else, and
+  counting both together produces wrong numbers. Both spellings (<code>boolean</code> and
+  <code>string</code>) are merged; a value that cannot be interpreted appears as “undecidable”
+  rather than as false, and instances without the input parameter appear as “marked only inside
+  the process” rather than as a dry run.
+</footer>
+{% endif %}
+{% endblock %}

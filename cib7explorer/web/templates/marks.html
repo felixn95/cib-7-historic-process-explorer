@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Marks{% endblock %}
+{% block header %}
+<span class="topbar-item">Marks — {{ total | num }} entries</span>
+<a class="topbar-item" href="{{ base_path }}/">Profiles</a>
+{% endblock %}
+
+{% block content %}
+<h1>Marks</h1>
+<p class="hint">
+  Marked cases, instances and definitions with your own notes — the seed for a later selection of
+  cases to investigate. The list lives as a plain file next to the tool
+  (<code>{{ path }}</code>), survives every cache rebuild and contains
+  <strong>no variable values</strong>, only references and your own text.
+</p>
+
+<form method="get" action="{{ base_path }}/marks" class="filterbar">
+  <label>Kind
+    <select name="kind">
+      <option value="">all</option>
+      {% for k in kinds %}<option value="{{ k.value }}" {{ "selected" if kind == k.value }}>{{ k.label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Profile
+    <select name="profile">
+      <option value="">all</option>
+      {% for p in profile_names %}<option value="{{ p }}" {{ "selected" if profile_filter == p }}>{{ p }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+  <a class="btn-link" href="{{ base_path }}/marks">reset</a>
+  <a class="btn-link" href="{{ base_path }}/marks.csv">as CSV</a>
+  <a class="btn-link" href="{{ base_path }}/marks.json">as JSON</a>
+</form>
+
+<p class="count"><strong>{{ marks | length | num }}</strong> of {{ total | num }} entries</p>
+
+{% if marks %}
+<div class="tablewrap">
+<table class="datatable">
+  <thead><tr><th>Kind</th><th>Reference</th><th>Context</th><th>Note</th>
+    <th>Profile</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {% for m in marks %}{% include "fragments/mark_row.html" %}{% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty-hint">
+  Nothing marked yet. Every case and every instance carries a “mark” button.
+</p>
+{% endif %}
+{% endblock %}

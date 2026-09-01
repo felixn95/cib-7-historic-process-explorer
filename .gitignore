@@ -1,0 +1,23 @@
+# Credentials and state never belong in the repository.
+profiles.yaml
+*.pw
+secrets/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+# Database dumps: several GB, and they contain real data.
+*.backup
+*.dump
+*.sql.gz
+# Local cache and restore state.
+*.sqlite
+*.sqlite-journal
+# Log and PID of the interface started by ./explorer.
+.explorer.log
+.explorer.pid
+# Editor and OS noise.
+.DS_Store
+.idea/
+.vscode/

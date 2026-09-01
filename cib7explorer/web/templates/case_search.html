@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% block title %}Cases — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+<h1>Cases</h1>
+<p class="hint">
+  A case is everything that happened to the same business object: the instances carrying the
+  business key <strong>and</strong> the complete parent/child chain around them. Instances without
+  a key of their own, and instances with a different key, belong to the case and are marked apart.
+</p>
+
+{% if error %}<div class="box-error">{{ error }}</div>{% endif %}
+
+<section>
+  <h2>Search</h2>
+  <form method="get" action="{{ base_path }}/profile/{{ profile.name }}/case" class="filterbar">
+    <label>Business key <input type="search" name="q" value="{{ q }}" placeholder="business key or a prefix of it" size="28" autofocus></label>
+    <label>Match
+      <select name="match_mode">
+        <option value="contains" {{ "selected" if match_mode == "contains" }}>contains</option>
+        <option value="prefix" {{ "selected" if match_mode == "prefix" }}>starts with</option>
+      </select>
+    </label>
+    <input type="hidden" name="browse" value="{{ browse }}">
+    <button type="submit">Search</button>
+  </form>
+
+  {% if q %}
+    <p class="count"><strong>{{ hits | length | num }}</strong> hits for “{{ q }}”</p>
+    {% if hits %}
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr><th>Business key</th><th class="num">Instances</th><th class="num">Definitions</th>
+        <th>First instance</th><th>Last active</th></tr></thead>
+      <tbody>
+      {% for t in hits %}
+        <tr>
+          <td><a href="{{ case_url(profile.name, t.key) }}"><code>{{ t.key }}</code></a></td>
+          <td class="num">{{ t.instances | num }}</td>
+          <td class="num">{{ t.definitions | num }}</td>
+          <td>{{ t.first_start | datetime(profile, with_zone=False) }}</td>
+          <td>{{ t.last_activity | datetime(profile, with_zone=False) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+      <p class="empty-hint">
+        No business key contains that string. Which does not necessarily mean the case never
+        existed — history cleanup removes instances, and the key goes with them.
+      </p>
+    {% endif %}
+  {% endif %}
+</section>
+
+<section>
+  <h2>Browse</h2>
+  <p class="hint">
+    So that interesting cases can be found without knowing a single key. The ordering is plain
+    counting, not a judgement.
+  </p>
+  <nav class="tabs">
+    {% for key, label in orders.items() %}
+      <a href="{{ base_path }}/profile/{{ profile.name }}/case?browse={{ key }}&q={{ q }}&match_mode={{ match_mode }}"
+         class="{{ 'active' if browse == key }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  {% if rows_browse %}
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr>
+      <th>Business key</th><th class="num">Instances</th><th class="num">Of those root</th>
+      <th class="num">Definitions</th><th class="num">Running</th><th class="num">Terminated</th>
+      <th class="num">Open incidents</th><th class="num">Total duration</th>
+      <th>First</th><th>Last active</th>
+    </tr></thead>
+    <tbody>
+    {% for s in rows_browse %}
+      <tr>
+        <td><a href="{{ case_url(profile.name, s.key) }}"><code>{{ s.key }}</code></a></td>
+        <td class="num">{{ s.instances | num }}</td>
+        <td class="num">{{ s.root_instances | num }}</td>
+        <td class="num">{{ s.definitions | num }}</td>
+        <td class="num">{{ s.running | num }}</td>
+        <td class="num">{{ s.terminated | num }}</td>
+        <td class="num">{{ s.open_incidents | num }}</td>
+        <td class="num">{{ s.span_ms | duration }}</td>
+        <td>{{ s.first_start | datetime(profile, with_zone=False) }}</td>
+        <td>{{ s.last_activity | datetime(profile, with_zone=False) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% elif not error %}
+    <p class="empty-hint">No business keys in this history.</p>
+  {% endif %}
+</section>
+
+<footer class="page-footer">
+  “Open incidents” are incidents of running instances from <code>act_ru_incident</code>. The
+  incident <em>history</em> is only written at history level FULL and is empty here — so a 0 in
+  that column does not mean there never was an incident.
+</footer>
+{% endblock %}

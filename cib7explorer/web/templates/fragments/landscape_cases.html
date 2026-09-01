@@ -1,0 +1,25 @@
+<div class="cases">
+  {% if error %}<div class="box-error">{{ error }}</div>
+  {% else %}
+    <h3>{{ title }}</h3>
+    <p class="hint">
+      <strong>{{ total | num }}</strong> cases
+      {% if total > keys | length %}· showing the {{ keys | length }} with the most root instances{% endif %}
+      <button type="button" class="small" onclick="this.closest('.cases').innerHTML=''">close</button>
+    </p>
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr><th>Business key</th><th class="num">Root instances</th><th>First instance</th></tr></thead>
+      <tbody>
+      {% for bk, n, first_start in keys %}
+        <tr>
+          <td><a href="{{ case_url(profile.name, bk) }}"><code>{{ bk }}</code></a></td>
+          <td class="num">{{ n | num }}</td>
+          <td>{{ first_start | datetime(profile, with_zone=False) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  {% endif %}
+</div>

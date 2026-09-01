@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% set L = land %}
+{% set base_path = base_path ~ "/profile/" ~ profile.name ~ "/landscape" %}
+{% macro drilldown(kind, a="", b="", month="", sequence="", text="") -%}
+<a class="drilldown" hx-get="{{ base_path }}/cases?kind={{ kind }}&a={{ a | urlencode }}&b={{ b | urlencode }}&month={{ month }}&sequence={{ sequence | urlencode }}"
+   hx-target="#cases" hx-swap="innerHTML" href="{{ base_path }}/cases?kind={{ kind }}&a={{ a | urlencode }}&b={{ b | urlencode }}&month={{ month }}&sequence={{ sequence | urlencode }}"
+   title="to the cases behind this number">{{ text }}</a>
+{%- endmacro %}
+{% block title %}Process landscape — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+<h1>Process landscape in numbers</h1>
+<p class="hint">
+  What happens here, at what volume, and how the processes hang together. <strong>Everything
+  here is counting</strong> — no scoring, no thresholds, no anomaly flags. Distributions appear
+  with median and quartiles, never as an average. Every number is clickable and leads to the
+  cases behind it.
+</p>
+
+{% if error %}<div class="box-error">{{ error }}</div>{% endif %}
+
+<div class="catalog-age">
+  {% if built_at %}
+    <p><strong>Landscape computed {{ built_at | datetime(profile) }}</strong>
+      {% if L %}<span class="hint">· the build took {{ L.meta.duration_ms | duration }}</span>{% endif %}</p>
+  {% endif %}
+  <div id="landscape-job" {% if job %}hx-get="{{ base_path }}/status" hx-trigger="load delay:2s" hx-swap="outerHTML"{% endif %}>
+    {% if job %}<p>Build running … {{ job.message }}</p>
+    {% elif not L %}
+      <p class="empty-hint">
+        The landscape has not been computed for this profile yet. It runs across the whole
+        history, so it is computed once and then kept — expect a few seconds.
+      </p>
+    {% endif %}
+    <form hx-post="{{ base_path }}/rebuild" hx-target="#landscape-job" hx-swap="outerHTML" method="post" action="{{ base_path }}/rebuild">
+      <button type="submit">{{ "Recompute" if L else "Compute the landscape" }}</button>
+    </form>
+  </div>
+</div>
+
+{% if L %}
+{% set m = L.meta %}
+<p class="hint">
+  <strong>Denominator and time window for everything on this page:</strong>
+  {{ m.instances_total | num }} process instances, of which {{ m.root_instances | num }} are root
+  instances, across {{ m.keys_total | num }} cases and {{ m.definitions_total }} process
+  definitions · {{ m.window_start | datetime(profile) }} to {{ m.window_end | datetime(profile) }}.
+  {% if L.validation_only_instances %}Included in that: {{ L.validation_only_instances | num }}
+  validation-only runs.{% endif %}
+</p>
+
+{% if m.notes %}
+<details class="notes" open>
+  <summary>{{ m.notes | length }} note(s) without which these numbers read wrongly</summary>
+  <ul>{% for n in m.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+
+<div id="cases" class="cases-space"></div>
+
+<section>
+  <h2>Sequence variety</h2>
+  <p class="hint">
+    How many distinct process sequences occur across all cases, and how concentrated they are.
+    What is counted is the sequence of <em>root instances</em> per business key.
+  </p>
+  <table class="kv">
+    <tr><th>Distinct sequences</th><td><strong>{{ L.sequences_distinct | num }}</strong>
+      across {{ m.keys_total | num }} cases</td></tr>
+    <tr><th>Sequences occurring exactly once</th><td>{{ L.sequences_unique_once | fraction(L.sequences_distinct) }}</td></tr>
+    <tr><th>Share of cases in the ten most frequent sequences</th><td>{{ L.sequence_concentration | pct }}</td></tr>
+  </table>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th class="num">Cases</th><th class="num">Length</th><th>Sequence</th><th>Examples</th></tr></thead>
+    <tbody>
+    {% for s in L.sequences[:sequences] %}
+      <tr>
+        <td class="num">{{ drilldown("sequence", sequence=s.sequence | join(">"), text=s.count | num) }}</td>
+        <td class="num">{{ s.length }}</td>
+        <td class="sequence">{% for d in s.sequence %}<code>{{ d }}</code>{% if not loop.last %} <span class="arrow">→</span> {% endif %}{% endfor %}</td>
+        <td class="hint">{% for bk in s.example_keys[:2] %}<a href="{{ case_url(profile.name, bk) }}">{{ bk }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">Showing {{ [L.sequences | length, sequences] | min }} of {{ L.sequences_distinct | num }} sequences
+    · <a href="{{ base_path }}?sequences=400&graph={{ graph_nodes }}&min_transition={{ min_transition }}">show more</a></p>
+</section>
+
+<section>
+  <h2>Transitions at case level</h2>
+  <div class="box-warn">
+    <strong>This is not a process model.</strong> None exists at this level — what is counted is
+    how often an ordering was observed when the root instances of a business key are put in
+    chronological order. Hence a table and not a flow chart: no start and end nodes, no process
+    notation. Rare transitions are not filtered away.
+  </div>
+  <form method="get" action="{{ base_path }}" class="filterbar">
+    <input type="hidden" name="graph" value="{{ graph_nodes }}"><input type="hidden" name="sequences" value="{{ sequences }}">
+    <label>Transitions seen at least <input type="number" name="min_transition" value="{{ min_transition }}" min="1" size="4"> times</label>
+    <button type="submit">apply</button>
+    {% if min_transition > 1 %}<a class="btn-link" href="{{ base_path }}?graph={{ graph_nodes }}&sequences={{ sequences }}">show everything</a>{% endif %}
+  </form>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th class="num">Observed</th><th class="num">Cases</th><th>From</th><th>To</th>
+      <th class="num">Median gap</th></tr></thead>
+    <tbody>
+    {% for t in L.transitions if t.count >= min_transition %}
+      <tr>
+        <td class="num">{{ drilldown("transition", a=t.from_def, b=t.to_def, text=t.count | num) }}</td>
+        <td class="num">{{ t.keys | num }}</td>
+        <td><code>{{ t.from_def }}</code></td>
+        <td><code>{{ t.to_def }}</code></td>
+        <td class="num">{{ t.median_gap_ms | duration }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Entry and exit points</h3>
+  <p class="hint">Which definition a case begins and ends with — counted, not drawn as start and end nodes.</p>
+  <div class="two-columns">
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr><th class="num">Cases</th><th>Begins with</th></tr></thead>
+      <tbody>{% for d, n in L.entry_defs[:15] %}
+        <tr><td class="num">{{ drilldown("entry", a=d, text=n | num) }}</td><td><code>{{ d }}</code></td></tr>
+      {% endfor %}</tbody>
+    </table>
+    </div>
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr><th class="num">Cases</th><th>Ends with</th></tr></thead>
+      <tbody>{% for d, n in L.exit_defs[:15] %}
+        <tr><td class="num">{{ drilldown("exit", a=d, text=n | num) }}</td><td><code>{{ d }}</code></td></tr>
+      {% endfor %}</tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Call graph</h2>
+  <p class="hint">
+    Which process definition calls which, aggregated over all instances. Edge width follows
+    frequency. This is a <em>technical</em> call relationship — as opposed to the co-occurrence
+    further down.
+  </p>
+  {% if graph %}
+  <form method="get" action="{{ base_path }}" class="filterbar">
+    <input type="hidden" name="sequences" value="{{ sequences }}"><input type="hidden" name="min_transition" value="{{ min_transition }}">
+    <label>Definitions in the graph <input type="number" name="graph" value="{{ graph_nodes }}" min="5" max="80" size="4"></label>
+    <button type="submit">apply</button>
+  </form>
+  <p class="hint">
+    Drawn: {{ graph.shown_edges }} of {{ graph.total_edges }} edges
+    ({{ graph.shown_calls | fraction(graph.total_calls) }} of the calls) — the table underneath
+    shows all of them. The arrangement around the circle follows call volume only; proximity in
+    the picture means nothing.
+  </p>
+  <div class="graph-frame">
+    <svg class="graph" viewBox="0 0 600 600" role="img" aria-label="call graph of the process definitions">
+      {% for e in graph.edges %}
+        <line class="graph-edge" x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}"
+              stroke-width="{{ e.width }}"><title>{{ e.parent }} → {{ e.child }}: {{ e.calls }} calls</title></line>
+      {% endfor %}
+      {% for n in graph.nodes %}
+        <circle class="graph-node" cx="{{ n.x }}" cy="{{ n.y }}" r="4"><title>{{ n.key }}: involved in {{ n.calls }} calls</title></circle>
+        <text class="graph-text" x="{{ n.x + (6 if n.label_anchor == 'start' else -6) }}" y="{{ n.y + 3 }}"
+              text-anchor="{{ n.label_anchor }}">{{ n.key[:22] }}</text>
+      {% endfor %}
+    </svg>
+  </div>
+  {% endif %}
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th class="num">Calls</th><th>Parent</th><th>Child</th>
+      <th class="num">Calling instances</th><th class="num">Calls per instance</th></tr></thead>
+    <tbody>
+    {% for e in L.call_edges %}
+      <tr>
+        <td class="num">{{ e.calls | num }}</td>
+        <td><a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ e.parent_def }}"><code>{{ e.parent_def }}</code></a></td>
+        <td><a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ e.child_def }}"><code>{{ e.child_def }}</code></a></td>
+        <td class="num">{{ e.parent_instances | num }}</td>
+        <td class="num">{{ "%.2f" | format(e.calls_per_parent or 0) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Roles and call depth</h3>
+  <div class="two-columns">
+    <table class="kv">
+      <tr><th>Root instance only</th><td>{{ L.only_root | length }} definitions</td></tr>
+      <tr><th>Subprocess only</th><td>{{ L.only_child | length }} definitions</td></tr>
+      <tr><th>In both roles</th><td><strong>{{ L.both_roles | length }}</strong> definitions
+        <div class="hint">{% for d in L.both_roles %}<a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ d }}"><code>{{ d }}</code></a>{% if not loop.last %}, {% endif %}{% endfor %}</div></td></tr>
+    </table>
+    <table class="datatable">
+      <thead><tr><th class="num">Call depth</th><th class="num">Instances</th><th>Share</th></tr></thead>
+      <tbody>{% for depth, n in L.depth_distribution %}
+        <tr><td class="num">{{ depth }}</td><td class="num">{{ n | num }}</td>
+          <td><span class="barline" style="width:{{ (100 * n / m.instances_total) | round(1) }}%"></span>
+            <span class="hint">{{ n | fraction(m.instances_total) }}</span></td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Co-occurrence at case level</h2>
+  <p class="hint">
+    Which process definitions appear on the same business key. <strong>A different thing from the
+    call graph:</strong> neither starts the other. That is precisely the layer nobody modelled.
+    Pairs that additionally have a call relationship are marked.
+  </p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th class="num">Cases</th><th>Definition A</th><th>Definition B</th><th></th></tr></thead>
+    <tbody>
+    {% for c in L.co_occurrence[:80] %}
+      <tr>
+        <td class="num">{{ drilldown("cooccurrence", a=c.def_a, b=c.def_b, text=c.keys | num) }}</td>
+        <td><code>{{ c.def_a }}</code></td>
+        <td><code>{{ c.def_b }}</code></td>
+        <td>{% if c.also_calls %}<span class="tag tag-note">also calls</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">Showing 80 of {{ L.co_occurrence | length | num }} precomputed pairs.</p>
+</section>
+
+<section>
+  <h2>Size and duration of the cases</h2>
+  <p class="hint">As a distribution, not as an average. Denominator: {{ m.keys_total | num }} cases.</p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th></th><th class="num">n</th><th class="num">min</th><th class="num">p25</th>
+      <th class="num">Median</th><th class="num">p75</th><th class="num">p90</th><th class="num">p99</th><th class="num">max</th></tr></thead>
+    <tbody>
+      {% for title, dv, kind in [("Process instances per case", L.instances_per_key, "number"),
+                                ("Process definitions per case", L.definitions_per_key, "number"),
+                                ("Total duration of a case", L.span_per_key_ms, "duration"),
+                                ("Gap between root instances", L.gaps_ms, "duration")] %}
+      <tr>
+        <td>{{ title }}</td><td class="num">{{ dv.n | num }}</td>
+        {% for value in [dv.minimum, dv.p25, dv.p50, dv.p75, dv.p90, dv.p99, dv.maximum] %}
+          <td class="num">{% if value is none %}—{% elif kind == "duration" %}{{ value | int | duration }}{% else %}{{ value | int | num }}{% endif %}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Gaps, counted</h3>
+  <p class="hint">
+    {{ L.gap_pairs | num }} transitions with a real gap, {{ L.overlap_pairs | num }} with an
+    overlap (simultaneity, not a gap).
+  </p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th>Gap duration</th><th class="num">Transitions</th><th>Share</th></tr></thead>
+    <tbody>{% for label, n in L.gap_counts %}
+      <tr><td>{{ drilldown("gap", a=label, text=gap_label(label)) }}</td>
+        <td class="num">{{ n | num }}</td>
+        <td><span class="barline" style="width:{{ (100 * n / (L.gap_pairs or 1)) | round(1) }}%"></span>
+          <span class="hint">{{ n | fraction(L.gap_pairs) }}</span></td></tr>
+    {% endfor %}</tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Frequency over time</h2>
+  <p class="hint">
+    Instances per process definition and month. Every cell is clickable and leads to the cases of
+    that month. Version changes are carried along as a number rather than as an axis of their
+    own: installations that redeploy on every build have hundreds of versions per definition, and
+    that would be noise.
+  </p>
+  {% set months = L.monthly | map(attribute="month") | unique | sort %}
+  {% set by_def = {} %}
+  {% for mc in L.monthly %}{% set _ = by_def.setdefault(mc.def_key, {}).update({mc.month: mc}) %}{% endfor %}
+  {% set peak = L.monthly | map(attribute="instances") | max %}
+  <div class="tablewrap">
+  <table class="datatable timeseries">
+    <thead><tr><th>Definition</th><th class="num">Total</th>
+      {% for mo in months %}<th class="num month">{{ mo.strftime("%m/%y") }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for def_key, series in by_def.items() | sort(attribute="0") %}
+      {% set row_total = series.values() | map(attribute="instances") | sum %}
+      {% if loop.index <= 40 %}
+      <tr>
+        <td><a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ def_key }}"><code>{{ def_key }}</code></a></td>
+        <td class="num">{{ drilldown("definition", a=def_key, text=row_total | num) }}</td>
+        {% for mo in months %}
+          {% set mc = series.get(mo) %}
+          <td class="num cell">
+            {% if mc %}<a class="drilldown" hx-get="{{ base_path }}/cases?kind=month&a={{ def_key | urlencode }}&month={{ mo.strftime('%Y-%m') }}"
+                hx-target="#cases" hx-swap="innerHTML" href="{{ base_path }}/cases?kind=month&a={{ def_key | urlencode }}&month={{ mo.strftime('%Y-%m') }}"
+                title="{{ mc.instances }} instances, {{ mc.versions }} versions">
+                <span class="mini" style="opacity:{{ 0.2 + 0.8 * (mc.instances / peak) ** 0.4 }}">{{ mc.instances | num }}</span></a>{% endif %}
+          </td>
+        {% endfor %}
+      </tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="hint">Showing the first 40 definitions alphabetically; the definitions page lists all of them.</p>
+</section>
+
+<section>
+  <h2>Actors</h2>
+  <div class="two-columns">
+    <table class="kv">
+      <tr><th>Distinct assignees</th><td>{{ L.actors.distinct_assignees }}</td></tr>
+      <tr><th>Assigned user tasks</th><td>{{ L.actors.assigned_tasks | num }}</td></tr>
+      <tr><th>Tasks without an assignee</th><td>{{ L.actors.unassigned_tasks | num }}</td></tr>
+      <tr><th>Definitions involving humans</th><td>{{ L.actors.definitions_with_human_tasks }}
+        of {{ m.definitions_total }}</td></tr>
+      <tr><th>Fully automated definitions</th><td>{{ L.actors.definitions_fully_automated }}</td></tr>
+      <tr><th>Starting user per instance</th><td>
+        {% if L.actors.start_users_available %}recorded{% else %}<strong>not recorded</strong>
+        <div class="hint">start_user_id_ is empty throughout this history — who triggered an
+          instance is not in the data.</div>{% endif %}</td></tr>
+    </table>
+    <table class="datatable">
+      <thead><tr><th>Assignee</th><th class="num">Tasks</th></tr></thead>
+      <tbody>{% for name, n in L.actors.per_assignee[:15] %}
+        <tr><td>{{ name }}</td><td class="num">{{ n | num }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Disruptions, counted</h2>
+  <p class="hint">
+    Frequency, not a quality verdict.
+    {% if not L.disruptions.historic_incidents_available %}The incident column shows <strong>open</strong>
+    incidents of running instances; the history is not recorded at this history level.{% endif %}
+  </p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th>Definition</th><th class="num">Instances</th><th class="num">Terminated from outside</th>
+      <th class="num">Terminated internally</th><th class="num">Open incidents</th></tr></thead>
+    <tbody>
+    {% for def_key, inst_count, external, internal, incidents in L.disruptions.per_definition[:40] %}
+      <tr>
+        <td><a href="{{ base_path }}/profile/{{ profile.name }}/definitions/{{ def_key }}"><code>{{ def_key }}</code></a></td>
+        <td class="num">{{ inst_count | num }}</td>
+        <td class="num">{% if external %}{{ external | fraction(inst_count) }}{% else %}0{% endif %}</td>
+        <td class="num">{% if internal %}{{ internal | fraction(inst_count) }}{% else %}0{% endif %}</td>
+        <td class="num">{% if incidents is none %}<span class="hint">not recorded</span>{% else %}{{ incidents | num }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<footer class="page-footer">
+  Times shown in {{ profile.display_timezone }}, database values in {{ profile.source_timezone }}.
+  The case level is computed over root instances per business key: {{ m.root_instances | num }}
+  root instances across {{ m.keys_total | num }} cases. Business keys carrying subprocess
+  instances only do not appear there.
+</footer>
+{% endif %}
+{% endblock %}

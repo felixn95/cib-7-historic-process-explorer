@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% import "fragments/definitions_header.html" as k %}
+{% set v = case %}
+{% block title %}{{ key }} — case — {{ profile.name }}{% endblock %}
+{% block header %}{{ k.topbar(profile) }}{% endblock %}
+
+{% block content %}
+<p class="crumb"><a href="{{ base_path }}/profile/{{ profile.name }}/case">← search and browse list</a></p>
+<h1>Case <code>{{ key }}</code></h1>
+<div hx-get="{{ base_path }}/marks/button?kind=business_key&reference={{ key | urlencode }}&profile={{ profile.name | urlencode }}"
+     hx-trigger="load" hx-swap="outerHTML"><span class="hint">marks …</span></div>
+
+{% if error %}<div class="box-error">{{ error }}</div>{% endif %}
+{% if not v %}
+  <p class="empty-hint">No case loaded.</p>
+{% elif not v.instances %}
+  <div class="box-warn">
+    {% for n in v.notes %}<p>{{ n.text }}</p>{% endfor %}
+  </div>
+{% else %}
+
+<p class="hint">
+  <strong>{{ v.instances_shown | num }}</strong>{% if v.instances_total != v.instances_shown %} of {{ v.instances_total | num }}{% endif %}
+  process instances in <strong>{{ v.trees_total | num }}</strong> call trees across
+  <strong>{{ v.definitions | length }}</strong> process definitions ·
+  {{ v.window_start | datetime(profile) }} to {{ v.window_end | datetime(profile) }}{% if v.open_end %} <span class="tag tag-warn">open end</span>{% endif %}
+  {% if v.truncated_left %}<span class="tag tag-warn">cut off at the start</span>{% endif %}
+  · loaded in {{ v.duration_ms }} ms
+</p>
+
+<p class="origin">
+  Origin of the instances:
+  <span class="tag tag-own">{{ v.instances_with_own_key | num }} carry the key</span>
+  <span class="tag tag-nokey">{{ v.instances_without_key | num }} without a key of their own</span>
+  <span class="tag tag-other">{{ v.instances_with_other_key | num }} different key</span>
+  {% if v.validation_only_count %}<span class="tag tag-valid">{{ v.validation_only_count | num }} validation only</span>{% endif %}
+  {% if v.running_count %}<span class="tag tag-run">{{ v.running_count | num }} still running</span>{% endif %}
+</p>
+
+{% if v.notes %}
+<details class="notes" open>
+  <summary>{{ v.notes | length }} note(s) on this case</summary>
+  <ul>
+    {% for n in v.notes %}<li class="{{ 'warn' if n.level == 'warn' else '' }}">{{ n.text }}</li>{% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+{% if density %}
+<section>
+  <h2>Density across the lifetime <span class="hint">({{ v.trees_total | num }} root instances, more than {{ density_threshold }} — hence the overview first)</span></h2>
+  <div class="density">
+    {% for b in density %}
+      <a class="density-bar" style="left:{{ b.left_pct }}%;width:{{ b.width_pct }}%;height:{{ b.height_pct }}%"
+         href="{{ case_url(profile.name, key) }}{{ '&' if '?' in case_url(profile.name, key) else '?' }}from_time={{ b.from_time }}&to_time={{ b.to_time }}"
+         title="{{ b.trees }} root instances, {{ b.start | datetime(profile, with_zone=False) }} to {{ b.end | datetime(profile, with_zone=False) }} — click to zoom in"></a>
+    {% endfor %}
+  </div>
+  <p class="hint">{{ v.window_start | datetime(profile, with_zone=False) }} — {{ v.window_end | datetime(profile, with_zone=False) }}</p>
+</section>
+{% endif %}
+
+<section>
+  <h2>Timeline</h2>
+  <form method="get" action="{{ case_url(profile.name, key) }}" class="filterbar timewindow">
+    {% if "?" in case_url(profile.name, key) %}<input type="hidden" name="key" value="{{ key }}">{% endif %}
+    <label>From
+      <input type="datetime-local" name="from_time" value="{{ from_field }}"
+             min="{{ limit_from }}" max="{{ limit_to }}" step="60"></label>
+    <label>To
+      <input type="datetime-local" name="to_time" value="{{ to_field }}"
+             min="{{ limit_from }}" max="{{ limit_to }}" step="60"></label>
+    <button type="submit">Set window</button>
+    <a class="btn-link" href="{{ case_url(profile.name, key) }}">whole case</a>
+    {% if suggestions %}
+      <span class="jump-windows">
+        {% for label, v_from, v_to in suggestions %}
+          <a class="btn-link" href="{{ case_url(profile.name, key) }}{{ '&' if '?' in case_url(profile.name, key) else '?' }}from_time={{ v_from }}&to_time={{ v_to }}">{{ label }}</a>
+        {% endfor %}
+      </span>
+    {% endif %}
+    <span class="hint">
+      Times in {{ profile.display_timezone }}; the calendar is clamped to the period of this case
+      ({{ limit_from | replace("T", " ") }} to {{ limit_to | replace("T", " ") }}).
+    </span>
+  </form>
+
+  {% if window %}
+  <p class="hint">
+    Window: {{ window[0] | datetime(profile) }} to {{ window[1] | datetime(profile) }} ·
+    one lane per call tree ({{ rows | length | num }} shown). <strong>Clicking the process
+    name</strong> opens the instance with its activities, variables and model; clicking the row
+    next to it expands the tree and shows the inner instances — which are linked too.
+  </p>
+
+  <div class="tl-axis">
+    <span class="tl-label"></span>
+    <span class="tl-ticks">
+      {% for t in ticks %}<span class="tl-tick" style="left:{{ t.left_pct }}%">{{ t.label }}</span>{% endfor %}
+    </span>
+    <span class="tl-meta"></span>
+  </div>
+
+  <div class="tl">
+    {# Gap bands sit behind the lanes -- they are the subject, not the space in between. #}
+    <div class="tl-bands">
+      {% for g in gap_bands %}
+        <div class="tl-band" style="left:{{ g.left_pct }}%;width:{{ g.width_pct }}%"
+             title="gap {{ g.duration_ms | duration }}: {{ g.start | datetime(profile, with_zone=False) }} to {{ g.end | datetime(profile, with_zone=False) }}"></div>
+      {% endfor %}
+    </div>
+
+    {% for r in rows %}
+    <details class="tl-row">
+      <summary>
+        <span class="tl-label">
+          <a class="tl-jump" href="{{ '/profile/' ~ profile.name ~ '/instance/' ~ r.tree.root_id }}"
+             title="open the instance: activities, variables, model">{{ r.tree.def_key }} ↗</a>
+          <span class="hint">{{ r.tree.instance_count }} inst.{% if r.tree.max_depth %}, depth {{ r.tree.max_depth }}{% endif %}</span>
+        </span>
+        <span class="tl-track">
+          <span class="tl-bar {{ 'is-valid' if r.tree.validation_only }} {{ 'is-run' if r.tree.running }} {{ 'is-term' if r.tree.terminated }}"
+                style="left:{{ r.bar.left_pct }}%;width:{{ r.bar.width_pct }}%"
+                title="{{ r.tree.def_key }} · {{ r.tree.start_time | datetime(profile, with_zone=False) }}{% if r.tree.end_time %} to {{ r.tree.end_time | datetime(profile, with_zone=False) }} ({{ r.tree.duration_ms | duration }}){% else %} — still running{% endif %}">
+            {%- if r.bar.open_right %}<span class="tl-open">▸</span>{% endif -%}
+          </span>
+        </span>
+        <span class="tl-meta">
+          {% if r.tree.business_keys and (r.tree.business_keys | length > 1 or r.tree.business_keys[0] != key) %}
+            <span class="tag tag-other" title="{{ r.tree.business_keys | join(', ') }}">key change</span>
+          {% endif %}
+          {% if r.tree.validation_only %}<span class="tag tag-valid">validation</span>{% endif %}
+          {% if r.tree.open_incidents %}<span class="tag tag-warn">{{ r.tree.open_incidents }} incident(s)</span>{% endif %}
+          {% if r.tree.running %}<span class="tag tag-run">running</span>{% endif %}
+        </span>
+      </summary>
+      <div class="tl-children">
+        {% for i in r.instances %}
+        <div class="tl-child" style="--depth:{{ i.depth }}">
+          <span class="tl-label">
+            <span class="tl-indent"></span><code>{{ i.def_key }}</code>
+            {% if i.version %}<span class="hint">v{{ i.version }}</span>{% endif %}
+          </span>
+          <span class="tl-inst">
+            <span class="tag tag-{{ 'own' if i.origin.value == 'own_key' else ('nokey' if i.origin.value == 'no_key' else 'other') }}">{{ i.origin.label }}{% if i.business_key and i.business_key != key %}: {{ i.business_key }}{% endif %}</span>
+            <span class="hint">{{ i.start_time | datetime(profile, with_zone=False) }}
+              {%- if i.end_time %} → {{ i.duration_ms | duration }}{% else %} → still running{% endif %}
+              · start: {{ i.start_trigger.label }}
+              {%- if i.state and i.state != 'COMPLETED' %} · {{ i.state }}{% endif %}
+              {%- if i.end_act_id %} · ends at {{ i.end_act_id }}{% endif %}
+              {%- if i.validation_only %} · <span class="tag tag-valid">validation only</span>{% endif %}
+              {%- if i.open_incidents %} · <span class="tag tag-warn">{{ i.open_incidents }} open incidents</span>{% endif %}
+              {%- if i.order_ambiguous %} · <span class="tag" title="same start time as another instance, order undetermined">order undetermined</span>{% endif %}
+              {%- if i.orphaned_parent %} · <span class="tag tag-warn">parent process not in this history</span>{% endif %}
+            </span>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Gaps <span class="hint">({{ gap_rows | length }} periods without a running process, {{ parallel_count }} parallel transitions)</span></h2>
+  <p class="hint">
+    Computed between call trees: subprocesses run inside their parents and would paper over every
+    gap. A parallel transition is not a gap but simultaneity.
+  </p>
+  {% if gap_rows %}
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th class="num">Duration</th><th>From</th><th>To</th><th>After process</th><th>Before process</th></tr></thead>
+    <tbody>
+    {% for g in gap_rows | sort(attribute="duration_ms", reverse=true) %}
+      <tr>
+        <td class="num"><strong>{{ g.duration_ms | duration }}</strong></td>
+        <td>{{ g.start | datetime(profile) }}</td>
+        <td>{{ g.end | datetime(profile) }}</td>
+        <td><code>{{ g.after_def }}</code></td>
+        <td><code>{{ g.before_def }}</code></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+    <p class="empty-hint">
+      No period without a running process{% if v.open_end %} — something is running throughout, so
+      there cannot be a gap here{% endif %}.
+    </p>
+  {% endif %}
+</section>
+
+{% if v.foreign_keys %}
+<section>
+  <h2>Different business keys <span class="hint">({{ v.foreign_keys | length }})</span></h2>
+  <p class="hint">
+    These keys appear inside this case's call chain. They are <strong>not</strong> merged in: what
+    else hangs off them belongs to another chain. The “outside” column says how much that is.
+  </p>
+  <div class="tablewrap">
+  <table class="datatable">
+    <thead><tr><th>Key</th><th class="num">In this case</th><th class="num">Total</th>
+      <th class="num">Outside</th><th>First seen here</th><th>Via definitions</th></tr></thead>
+    <tbody>
+    {% for f in v.foreign_keys %}
+      <tr>
+        <td><a href="{{ case_url(profile.name, f.key) }}"><code>{{ f.key }}</code></a></td>
+        <td class="num">{{ f.instances_in_case | num }}</td>
+        <td class="num">{% if f.instances_total is none %}<span class="hint">not determined</span>{% else %}{{ f.instances_total | num }}{% endif %}</td>
+        <td class="num">{% if f.instances_outside is none %}—{% else %}{{ f.instances_outside | num }}{% endif %}</td>
+        <td>{{ f.first_seen | datetime(profile, with_zone=False) }}</td>
+        <td class="hint">{{ f.via_definitions | join(", ") }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section>
+  <h2>Second track: the same object id in other instances</h2>
+  <div id="correlation" hx-get="{{ '/profile/' ~ profile.name ~ '/case/' ~ key ~ '/correlation' }}"
+       hx-trigger="load" hx-swap="outerHTML">
+    <p class="hint">Loading … (this reads variable values and takes about a second)</p>
+  </div>
+</section>
+
+<section>
+  <h2>All instances as a table</h2>
+  <details {{ "open" if table }}>
+    <summary>Show {{ instances_page.total | num }} instances
+      {%- if instances_page.pages > 1 %} (page {{ instances_page.page }} of {{ instances_page.pages }},
+      rows {{ instances_page.from_time | num }}–{{ instances_page.to_time | num }}){% endif %}</summary>
+    <div class="tablewrap">
+    <table class="datatable">
+      <thead><tr>
+        <th>Process</th><th class="num">Depth</th><th>Origin</th><th>Start</th>
+        <th class="num">Duration</th><th>End</th><th>Start trigger</th><th>State</th><th>Instance id</th>
+      </tr></thead>
+      <tbody>
+      {% for i in instances_page.rows %}
+        <tr>
+          <td><a href="{{ '/profile/' ~ profile.name ~ '/instance/' ~ i.proc_inst_id }}"><code>{{ i.def_key }}</code></a>{% if i.version %} <span class="hint">v{{ i.version }}</span>{% endif %}</td>
+          <td class="num">{{ i.depth }}</td>
+          <td><span class="tag tag-{{ 'own' if i.origin.value == 'own_key' else ('nokey' if i.origin.value == 'no_key' else 'other') }}">{{ i.origin.label }}</span>
+            {% if i.business_key and i.business_key != key %}<div class="hint">{{ i.business_key }}</div>{% endif %}</td>
+          <td>{{ i.start_time | datetime(profile, with_zone=False) }}{% if i.order_ambiguous %} <span class="tag" title="order undetermined">≈</span>{% endif %}</td>
+          <td class="num">{{ i.duration_ms | duration }}</td>
+          <td>{{ i.end_act_id or "" }}</td>
+          <td class="hint">{{ i.start_trigger.label }}</td>
+          <td>{{ i.state or "" }}{% if i.validation_only %} <span class="tag tag-valid">val.</span>{% endif %}</td>
+          <td class="hint"><a href="{{ '/profile/' ~ profile.name ~ '/instance/' ~ i.proc_inst_id }}"><code>{{ i.proc_inst_id }}</code></a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% if instances_page.pages > 1 %}
+    <nav class="pager">
+      {% if instances_page.page > 1 %}<a href="?table=1&page={{ instances_page.page - 1 }}&from_time={{ from_time }}&to_time={{ to_time }}">← previous</a>{% endif %}
+      <span>page {{ instances_page.page }} / {{ instances_page.pages }}</span>
+      {% if instances_page.page < instances_page.pages %}<a href="?table=1&page={{ instances_page.page + 1 }}&from_time={{ from_time }}&to_time={{ to_time }}">next →</a>{% endif %}
+    </nav>
+    {% endif %}
+  </details>
+</section>
+
+<footer class="page-footer">
+  Every process name and every instance id leads into the instance detail view.
+  Times shown in {{ profile.display_timezone }}, database values in {{ profile.source_timezone }}.
+</footer>
+{% endif %}
+{% endblock %}
