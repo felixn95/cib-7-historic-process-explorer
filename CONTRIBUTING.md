@@ -22,6 +22,17 @@ Tests against a real engine database are marked `integration` and deselected by 
 CIB7_TEST_PROFILE=my-profile uv run pytest -m integration
 ```
 
+## What CI checks on a pull request
+
+Every pull request runs the unit suite on Python 3.12 and 3.13, builds the package, and builds the
+container image and asks it for `/health` -- a container that does not come up is a failure even
+when the tests pass. The integration suite is **not** run there: it needs a real engine database,
+which a CI runner has no business holding. Run it locally against your own installation and say in
+the pull request that you did.
+
+Publishing the image happens only from `main` and from version tags, never from a pull request, so
+a fork can neither publish nor reach any credential.
+
 ## Invariants
 
 These are the properties the tool exists for. A change that weakens one of them needs a very good

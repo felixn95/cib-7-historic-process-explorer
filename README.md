@@ -2,16 +2,15 @@
 
 [![tests](https://github.com/felixn95/cib-7-historic-process-explorer/actions/workflows/tests.yml/badge.svg)](https://github.com/felixn95/cib-7-historic-process-explorer/actions/workflows/tests.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![image](https://img.shields.io/badge/ghcr.io-container%20image-blue?logo=docker&logoColor=white)](https://github.com/felixn95/cib-7-historic-process-explorer/pkgs/container/cib-7-historic-process-explorer)
 
 A tool for reading and understanding the process history of a CIB seven or Camunda 7 engine on
 PostgreSQL. It **only ever reads**: browse the process definitions, follow one business object
 from beginning to end, zoom into a single process instance.
 
-**Read-only, provably.** A select-only role, `default_transaction_read_only`, every query inside
-  a transaction explicitly opened READ ONLY, plus a static guard that lets nothing but a single
-  read statement through. The interface shows the evidence -- gathered without ever attempting a
-  write.
-
+**Read-only, provably.** A select-only role, `default_transaction_read_only`, every query inside a
+transaction explicitly opened READ ONLY, plus a static guard that lets nothing but a single read
+statement through. The interface shows the evidence -- gathered without ever attempting a write.
 
 ---
 
@@ -40,7 +39,7 @@ docker run --rm -p 8123:8123 \
   -e CIB7_DB_USER=explorer_ro \
   -e CIB7_DB_PASSWORD=… \
   -e CIB7_CLASSIFICATION=test \
-  ghcr.io/felixn95/cib-7-historic-process-explorer:latest
+  ghcr.io/felixn95/cib-7-historic-process-explorer:main
 ```
 
 Then open **http://127.0.0.1:8123**. `CIB7_DB_HOST` is what decides that this profile exists at
@@ -69,7 +68,8 @@ comes from the environment, so changing the target needs no new image.
 # docker-compose.yml
 services:
   process-explorer:
-    image: ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0
+    # Pin a released tag here (e.g. :0.1.0) as soon as one exists -- see the tag scheme above.
+    image: ghcr.io/felixn95/cib-7-historic-process-explorer:main
     restart: unless-stopped
     environment:
       CIB7_DB_HOST: postgres            # the service name inside the network
@@ -102,22 +102,14 @@ networks:
     name: the-name-of-your-existing-network
 ```
 
-**While the repository is private, the package is too**, so the server needs credentials to pull:
+The package is public: `docker pull` needs **no credentials**, and no pull rate limit applies to
+it. Nothing has to be configured on the server beyond reaching `ghcr.io`.
+
+If the server cannot reach it, the image travels over SSH without any registry:
 
 ```bash
-# On the server, with a token that has read:packages and nothing else
-echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
-```
-
-Once the repository is public, make the package public as well (GitHub → the repository →
-Packages → the package → *Package settings* → *Change visibility*). Then `docker pull` needs no
-credentials at all, and no rate limit applies to it.
-
-If the server cannot reach ghcr.io, the image travels over SSH without any registry:
-
-```bash
-docker pull --platform linux/amd64 ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0
-docker save ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0 | ssh server 'docker load'
+docker pull --platform linux/amd64 ghcr.io/felixn95/cib-7-historic-process-explorer:main
+docker save ghcr.io/felixn95/cib-7-historic-process-explorer:main | ssh server 'docker load'
 ```
 
 `--platform` matters when your workstation and the server disagree about their architecture: an
