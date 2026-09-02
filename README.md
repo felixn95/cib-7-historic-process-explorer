@@ -28,8 +28,7 @@ ghcr.io/felixn95/cib-7-historic-process-explorer:main    # the development head
 ```
 
 Pin a version on a server. `latest` moves only when a release is tagged, `main` moves with every
-merge -- convenient to try, wrong to depend on. The version tags come into being when a `v*.*.*`
-tag is pushed, so until the first release only `main` and the commit tags exist.
+merge -- convenient to try, wrong to depend on.
 
 ```bash
 docker run --rm -p 8123:8123 \
@@ -39,7 +38,7 @@ docker run --rm -p 8123:8123 \
   -e CIB7_DB_USER=explorer_ro \
   -e CIB7_DB_PASSWORD=… \
   -e CIB7_CLASSIFICATION=test \
-  ghcr.io/felixn95/cib-7-historic-process-explorer:main
+  ghcr.io/felixn95/cib-7-historic-process-explorer:latest
 ```
 
 Then open **http://127.0.0.1:8123**. `CIB7_DB_HOST` is what decides that this profile exists at
@@ -68,8 +67,7 @@ comes from the environment, so changing the target needs no new image.
 # docker-compose.yml
 services:
   process-explorer:
-    # Pin a released tag here (e.g. :0.1.0) as soon as one exists -- see the tag scheme above.
-    image: ghcr.io/felixn95/cib-7-historic-process-explorer:main
+    image: ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0
     restart: unless-stopped
     environment:
       CIB7_DB_HOST: postgres            # the service name inside the network
@@ -108,8 +106,8 @@ it. Nothing has to be configured on the server beyond reaching `ghcr.io`.
 If the server cannot reach it, the image travels over SSH without any registry:
 
 ```bash
-docker pull --platform linux/amd64 ghcr.io/felixn95/cib-7-historic-process-explorer:main
-docker save ghcr.io/felixn95/cib-7-historic-process-explorer:main | ssh server 'docker load'
+docker pull --platform linux/amd64 ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0
+docker save ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0 | ssh server 'docker load'
 ```
 
 `--platform` matters when your workstation and the server disagree about their architecture: an
