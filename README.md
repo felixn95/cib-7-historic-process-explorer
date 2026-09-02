@@ -44,18 +44,33 @@ docker run --rm -p 8123:8123 \
 Then open **http://127.0.0.1:8123**. `CIB7_DB_HOST` is what decides that this profile exists at
 all; everything else has a default. See [Configuration](#configuration).
 
-The read-only role is worth creating properly:
+The read-only role is worth creating properly. This needs a role that may create roles --
+a superuser, or one with `CREATEROLE`; the engine's own database user usually has neither.
 
 ```sql
+-- Run as a superuser (or a role with CREATEROLE):
 CREATE ROLE explorer_ro LOGIN PASSWORD '…';
 ALTER ROLE explorer_ro SET default_transaction_read_only = on;
 ALTER ROLE explorer_ro SET statement_timeout = '30s';
 GRANT CONNECT ON DATABASE camunda TO explorer_ro;
+
+-- The rest has to run INSIDE the engine database:  \c camunda
 GRANT USAGE ON SCHEMA public TO explorer_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO explorer_ro;
--- so that tables created by a later engine upgrade stay readable:
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO explorer_ro;
+
+-- So that tables created by a later engine upgrade stay readable. FOR ROLE matters: default
+-- privileges apply to objects created BY THE NAMED ROLE, so it has to name the role that owns
+-- the engine tables -- otherwise this line silently protects nothing and the gap only shows up
+-- after the next upgrade adds a table.
+--   SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'act\_%';
+ALTER DEFAULT PRIVILEGES FOR ROLE <owner of the engine tables> IN SCHEMA public
+    GRANT SELECT ON TABLES TO explorer_ro;
 ```
+
+`ALL TABLES` rather than a hand-picked list of `act_*`: detection also reads
+`flyway_schema_history` to report the migration state, and a future engine version may add a
+table this tool has never heard of. Where the engine database holds more than the engine, grant
+per table instead.
 
 ### On a server, next to an existing stack
 
