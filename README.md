@@ -7,20 +7,11 @@ A tool for reading and understanding the process history of a CIB seven or Camun
 PostgreSQL. It **only ever reads**: browse the process definitions, follow one business object
 from beginning to end, zoom into a single process instance.
 
-What it deliberately does *not* do: no extraction pipeline, no process discovery, no inferential
-statistics, no scored indicators. It shows what is in the data, and says plainly what is not.
-
-Three properties define it:
-
-- **Read-only, provably.** A select-only role, `default_transaction_read_only`, every query inside
+**Read-only, provably.** A select-only role, `default_transaction_read_only`, every query inside
   a transaction explicitly opened READ ONLY, plus a static guard that lets nothing but a single
   read statement through. The interface shows the evidence -- gathered without ever attempting a
   write.
-- **A missing number is never a zero.** Camunda history is only as complete as the configured
-  history level allows. Where a number cannot be determined, the interface says so and gives the
-  reason, instead of printing a 0 that reads like a fact.
-- **Every number carries its denominator.** "In 7,900 of 8,000 instances (98.8 %)", never a bare
-  percentage.
+
 
 ---
 
