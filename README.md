@@ -28,6 +28,19 @@ Three properties define it:
 
 ### With Docker, against a database you already have
 
+Images are published to the GitHub Container Registry, for `linux/amd64` and `linux/arm64`:
+
+```
+ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0   # a released version
+ghcr.io/felixn95/cib-7-historic-process-explorer:0.1     # the latest 0.1.x
+ghcr.io/felixn95/cib-7-historic-process-explorer:latest  # the latest release
+ghcr.io/felixn95/cib-7-historic-process-explorer:main    # the development head
+```
+
+Pin a version on a server. `latest` moves only when a release is tagged, `main` moves with every
+merge -- convenient to try, wrong to depend on. The version tags come into being when a `v*.*.*`
+tag is pushed, so until the first release only `main` and the commit tags exist.
+
 ```bash
 docker run --rm -p 8123:8123 \
   -e CIB7_DB_HOST=your-postgres \
@@ -36,7 +49,7 @@ docker run --rm -p 8123:8123 \
   -e CIB7_DB_USER=explorer_ro \
   -e CIB7_DB_PASSWORD=… \
   -e CIB7_CLASSIFICATION=test \
-  <image>
+  ghcr.io/felixn95/cib-7-historic-process-explorer:latest
 ```
 
 Then open **http://127.0.0.1:8123**. `CIB7_DB_HOST` is what decides that this profile exists at
@@ -54,6 +67,71 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO explorer_ro;
 -- so that tables created by a later engine upgrade stay readable:
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO explorer_ro;
 ```
+
+### On a server, next to an existing stack
+
+The image expects to sit in the same container network as the database and behind whatever proxy
+the surrounding stack already has. Nothing about the target lives in the image: the connection
+comes from the environment, so changing the target needs no new image.
+
+```yaml
+# docker-compose.yml
+services:
+  process-explorer:
+    image: ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0
+    restart: unless-stopped
+    environment:
+      CIB7_DB_HOST: postgres            # the service name inside the network
+      CIB7_DB_NAME: camunda
+      CIB7_DB_USER: explorer_ro
+      CIB7_DB_PASSWORD: ${EXPLORER_DB_PASSWORD:?set it in .env}
+      CIB7_CLASSIFICATION: prod         # prod without an allowlist => no variable values
+      CIB7_SOURCE_TZ: UTC               # the zone the engine's JVM wrote its timestamps in
+      CIB7_DISPLAY_TZ: Europe/Berlin
+      CIB7_BASE_PATH: /process-explorer # only when served under a path prefix
+      # On a shared server, add the login. Without CIB7_OIDC_ISSUER there is none, and anybody
+      # who reaches the port reads the process history -- see "Login" below. An incomplete OIDC
+      # configuration fails at startup rather than degrading to an open interface.
+      # CIB7_OIDC_ISSUER: https://keycloak/auth/realms/default
+      # CIB7_OIDC_CLIENT_ID: process-explorer
+      # CIB7_PUBLIC_URL: https://server/process-explorer
+      # CIB7_SESSION_SECRET: ${EXPLORER_SESSION_SECRET:?openssl rand -base64 48}
+    volumes:
+      # The cache is disposable, the mark list is not. Both live here, so a container
+      # replacement does not throw away what somebody wrote down.
+      - explorer-state:/state
+    networks: [engine]
+
+volumes:
+  explorer-state:
+
+networks:
+  engine:
+    external: true
+    name: the-name-of-your-existing-network
+```
+
+**While the repository is private, the package is too**, so the server needs credentials to pull:
+
+```bash
+# On the server, with a token that has read:packages and nothing else
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+Once the repository is public, make the package public as well (GitHub → the repository →
+Packages → the package → *Package settings* → *Change visibility*). Then `docker pull` needs no
+credentials at all, and no rate limit applies to it.
+
+If the server cannot reach ghcr.io, the image travels over SSH without any registry:
+
+```bash
+docker pull --platform linux/amd64 ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0
+docker save ghcr.io/felixn95/cib-7-historic-process-explorer:0.1.0 | ssh server 'docker load'
+```
+
+`--platform` matters when your workstation and the server disagree about their architecture: an
+`arm64` image will not start on an `amd64` host, and the error it gives says `exec format error`
+rather than anything about architectures.
 
 ### Locally, against a dump file
 

@@ -34,6 +34,14 @@ USER explorer
 
 EXPOSE 8123
 
+# The check runs through Python rather than curl: this base image ships neither curl nor wget,
+# and installing one just to ask a question the interpreter can ask is a package more to keep
+# patched. /health answers without touching the database, so an unreachable engine does not
+# make the container look unhealthy -- that distinction is the whole point of the endpoint.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import urllib.request, sys; \
+sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8123/health', timeout=4).status == 200 else 1)"]
+
 # --host 0.0.0.0: inside a container the network boundary is the container, not the interface.
 # On a host, ./explorer still binds 127.0.0.1 -- that stays as it is.
 # A path prefix (behind a proxy) is set via CIB7_BASE_PATH rather than hard-coded here, so the
